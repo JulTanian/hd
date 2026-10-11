@@ -108,11 +108,13 @@ function Browse({ onNavigate, active = true }) {
       const request = listRequest.current;
       const key = JSON.stringify([source, cat, gen, pg]);
       const cached = pageCache.get(key);
+      const fallbackUrl = source === 'hongguo'
+        ? `https://hongguoduanju.com/${cat.startsWith('hot-') ? 'rank' : 'category'}/${encodeURIComponent(cat)}${gen ? `/${encodeURIComponent(gen)}` : ''}${pg > 1 ? `?page=${pg}` : ''}` : '';
       setUnsupported(false);
       setError('');
       setResults(cached?.results || []);
       setMeta(cached?.meta || { total: 0, totalPages: 0, genres: [] });
-      setSourceUrl(cached?.sourceUrl || '');
+      setSourceUrl(cached?.sourceUrl || fallbackUrl);
       if (!forceRefresh && cached && Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS) {
         setLoading(false);
         return;
@@ -127,11 +129,12 @@ function Browse({ onNavigate, active = true }) {
       try {
         const res = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: pg, forceRefresh });
         if (request !== listRequest.current) return;
+        setSourceUrl(res?.sourceUrl || fallbackUrl);
         if (!res?.success) throw new Error(res?.error || '来源暂时不可用');
         const next = {
           results: Array.isArray(res.results) ? res.results : [],
           meta: { total: res.total || 0, totalPages: res.totalPages || 0, genres: res.genres || [], hasMore: res.hasMore === true },
-          sourceUrl: res.sourceUrl || '',
+          sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
         };
         setResults(next.results);
@@ -329,7 +332,7 @@ function Browse({ onNavigate, active = true }) {
     };
     out.push(1);
     for (let i = cur - 1; i <= cur + 1; i++) push(i);
-    out.push(totalPages);
+    push(totalPages);
     return out.sort((a, b) => a - b);
   }, [totalPages, page]);
 
@@ -352,17 +355,23 @@ function Browse({ onNavigate, active = true }) {
       </div>
 
       {/* 分类 tab */}
-      {source === 'hongguo' && <div className="browse-cats">
-        {(categories.length ? categories : [{ slug: 'real-drama', label: '真人剧' }]).map((c) => (
+      {source === 'hongguo' && [false, true].map(ranking => {
+        const group = (categories.length ? categories : [{ slug: 'real-drama', label: '真人剧' }])
+          .filter(c => c.slug.startsWith('hot-') === ranking);
+        return group.length > 0 && <div className="browse-cats" role="group" aria-label={ranking ? '热播榜单' : '短剧分类'} key={String(ranking)}>
+        <span className="browse-nav-label">{ranking ? '热播榜' : '分类'}</span>
+        {group.map((c) => (
           <button
             key={c.slug}
             className={`browse-cat ${category === c.slug ? 'active' : ''}`}
+            aria-pressed={category === c.slug}
             onClick={() => switchCategory(c.slug)}
           >
             {c.label}
           </button>
         ))}
-      </div>}
+      </div>;
+      })}
 
       {/* 题材 chips */}
       {meta.genres.length > 0 && (
@@ -404,6 +413,7 @@ function Browse({ onNavigate, active = true }) {
                 title={item.series_title}
               >
                 <div className="browse-cover">
+                  {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
                   {item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading="lazy" />
                   ) : (
@@ -424,6 +434,7 @@ function Browse({ onNavigate, active = true }) {
                   </div>
                 </div>
                 <div className="browse-card-title">{item.series_title}</div>
+                {item.heat && <div className="browse-card-heat">{item.heat}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
                     {item.tags.slice(0, 2).map((t) => (

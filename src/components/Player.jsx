@@ -17,6 +17,7 @@ function Player({ target, onNavigate, active = true }) {
   const [detail, setDetail] = useState(null); // { series_title, episodes: [...], total, completedCount }
   const [currentIndex, setCurrentIndex] = useState(1);
   const [autoNext, setAutoNext] = useState(true);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -48,6 +49,7 @@ function Player({ target, onNavigate, active = true }) {
   const [mergeAsk, setMergeAsk] = useState(false);            // 合并格式选择
 
   const videoRef = useRef(null);
+  const playbackRateRef = useRef(1);
   const toastTimer = useRef(null);
   const pendingSeekRef = useRef(0); // 切集后要跳转的秒数
   const lastSavedRef = useRef(0);
@@ -68,7 +70,7 @@ function Player({ target, onNavigate, active = true }) {
   // 只有收到当前片源的 metadata 后才保存，避免旧元素的 pause 覆盖新集断点。
   const persistPosition = useCallback((force = false) => {
     const media = loadedMediaRef.current;
-    if (!media || media.version !== mediaVersion.current) return;
+    if (!media?.played || media.version !== mediaVersion.current) return;
     const seconds = media.element.currentTime;
     if (!Number.isFinite(seconds) || seconds < 0) return;
     if (!force && Math.abs(seconds - lastSavedRef.current) < 3) return;
@@ -141,6 +143,20 @@ function Player({ target, onNavigate, active = true }) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }, []);
+
+  const changePlaybackRate = useCallback((value, notify = true) => {
+    const rate = Number(value);
+    if (!Number.isFinite(rate)) return;
+    const next = Math.max(0.25, Math.min(4, rate));
+    playbackRateRef.current = next;
+    setPlaybackRate(next);
+    const v = videoRef.current;
+    if (v) {
+      v.defaultPlaybackRate = next;
+      v.playbackRate = next;
+    }
+    if (notify) showToast(`播放速度 ${next}×`);
+  }, [showToast]);
 
   // 载入已登记的剧集列表
   const loadSeriesList = useCallback(async () => {
@@ -311,8 +327,10 @@ function Player({ target, onNavigate, active = true }) {
     if (loading || !canPlay || !v) return;
     const previous = lastLoadRef.current;
     lastLoadRef.current = { source: videoSrc, version: playbackVersion };
+    v.defaultPlaybackRate = playbackRateRef.current;
     // 相同地址的显式重试不会触发 src 变更，用原生 load 重置媒体即可。
     if (previous?.source === videoSrc && previous.version !== playbackVersion) v.load();
+    v.playbackRate = playbackRateRef.current;
   }, [loading, canPlay, videoSrc, playbackVersion]);
 
   const playableCount = episodes.filter((e) => e.status === 'completed').length;
@@ -377,8 +395,15 @@ function Player({ target, onNavigate, active = true }) {
 
   // 播放中若始终解不出画面（videoWidth 一直为 0），判定为解码不兼容。
   // 必须定义在早返回之前 —— hooks 不能出现在条件分支之后。
-  const handlePlaying = useCallback(() => {
-    if (playbackVersion !== mediaVersion.current || !canPlay || loadedMediaRef.current?.version !== mediaVersion.current) return;
+  const handlePlaying = useCallback((event) => {
+    const media = loadedMediaRef.current;
+    const element = event.currentTarget;
+    if (playbackVersion !== mediaVersion.current || !canPlay || media?.version !== mediaVersion.current || media.element !== element) return;
+    if (element.currentSrc && element.currentSrc !== videoSrc) return;
+    if (!media.played) {
+      media.played = true;
+      persistPosition(true);
+    }
     setDecodeFailed(false);
     setMediaBuffering(false);
     const idx = currentIndex;
@@ -397,7 +422,7 @@ function Player({ target, onNavigate, active = true }) {
       }
     }, 2600);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoCompat, compatMap, currentIndex, startCompatPlay, showToast, playbackVersion, canPlay]);
+  }, [autoCompat, compatMap, currentIndex, startCompatPlay, showToast, playbackVersion, canPlay, videoSrc, persistPosition]);
 
   /**
    * 在线播放：明文片源按需加载，加密片源准备后返回播放地址。
@@ -417,7 +442,6 @@ function Player({ target, onNavigate, active = true }) {
       const request = { requestId: crypto.randomUUID(), vid: ep.vid };
       onlineRequestRef.current = request;
       pendingSeekRef.current = seekTo;
-      window.electronAPI.savePlaybackPosition(activeSeriesId, vidIndex, seekTo).catch(() => {});
       setCurrentIndex(vidIndex);
       setWaitingFor(null);
       setOnlineProgress({ vid: ep.vid, percent: 0, phase: 'preparing' });
@@ -474,7 +498,6 @@ function Player({ target, onNavigate, active = true }) {
       setCurrentIndex(vidIndex);
       setWaitingFor(null);
       pendingSeekRef.current = seekTo;
-      window.electronAPI.savePlaybackPosition(activeSeriesId, vidIndex, seekTo).catch(() => {});
     },
     [episodes, activeSeriesId, resetPlayback, startOnlinePlay, currentPosition]
   );
@@ -549,7 +572,9 @@ function Player({ target, onNavigate, active = true }) {
     const v = event.currentTarget;
     if (!canPlay || playbackVersion !== mediaVersion.current || v !== videoRef.current || !current || current.locked) return;
     if (v.currentSrc && v.currentSrc !== videoSrc) return;
-    loadedMediaRef.current = { element: v, seriesId: activeSeriesId, vidIndex: currentIndex, version: mediaVersion.current };
+    loadedMediaRef.current = { element: v, seriesId: activeSeriesId, vidIndex: currentIndex, version: mediaVersion.current, played: false };
+    v.defaultPlaybackRate = playbackRateRef.current;
+    v.playbackRate = playbackRateRef.current;
     const seekTo = Math.max(0, Number(pendingSeekRef.current) || 0);
     if (seekTo > 0 && (!Number.isFinite(v.duration) || seekTo < v.duration - 3)) {
       v.currentTime = seekTo;
@@ -562,10 +587,11 @@ function Player({ target, onNavigate, active = true }) {
 
   // 快捷键
   useEffect(() => {
-    if (!active) return;
+    if (!active || confirmAsk || mergeAsk) return;
     const onKey = (e) => {
       const v = videoRef.current;
-      if (!v || e.target.closest('input, button, select, textarea, [contenteditable=true]')) return;
+      if (!v || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return;
+      if (e.target?.isContentEditable || e.target?.closest?.('input, button, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
       const { currentIndex: ci, autoNext: an } = stateRef.current;
       if (e.code === 'Space') {
         e.preventDefault();
@@ -584,13 +610,16 @@ function Player({ target, onNavigate, active = true }) {
         if (n) goToEpisode(n.vid_index);
       } else if (e.key.toLowerCase() === 'a') {
         setAutoNext(!an);
+      } else if (['s', 'd'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        changePlaybackRate(playbackRateRef.current + (e.key.toLowerCase() === 's' ? -0.25 : 0.25));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, findNext, findPrev, goToEpisode]);
+  }, [active, confirmAsk, mergeAsk, findNext, findPrev, goToEpisode, changePlaybackRate]);
 
-  const switchSeries = useCallback(async (sid, requestedIndex = 0) => {
+  const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false) => {
     persistPosition(true);
     const version = ++selectionVersion.current;
     selectedSeriesRef.current = String(sid);
@@ -604,7 +633,7 @@ function Player({ target, onNavigate, active = true }) {
     try {
       const d = await loadDetail(sid);
       if (!d || version !== selectionVersion.current) return;
-      const saved = requestedIndex ? null : await window.electronAPI.getPlaybackPosition(sid);
+      const saved = requestedIndex && !resume ? null : await window.electronAPI.getPlaybackPosition(sid);
       if (version !== selectionVersion.current) return;
       const wantedIndex = requestedIndex || saved?.vid_index;
       const selected = d.episodes.find(e => e.vid_index === wantedIndex && !e.locked) || d.episodes.find(e => !e.locked);
@@ -630,7 +659,7 @@ function Player({ target, onNavigate, active = true }) {
         if (cancelled) return;
         const wanted = target?.seriesId && list.find(s => String(s.series_id) === String(target.seriesId));
         const selected = wanted || [...list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0);
+        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0, !!(wanted && target.resume));
         else setLoading(false);
       } catch (e) {
         if (!cancelled) { setLoading(false); showToast('加载剧库失败: ' + e.message); }
@@ -798,6 +827,12 @@ function Player({ target, onNavigate, active = true }) {
         </div>
         <div className="player-header-right">
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
+          <label className="player-speed-control">
+            速度
+            <select aria-label="播放速度" title="S 减速 · D 加速，每次 0.25 倍" value={playbackRate} onChange={(e) => changePlaybackRate(e.target.value)}>
+              {Array.from({ length: 16 }, (_, i) => (i + 1) / 4).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+            </select>
+          </label>
           <button
             aria-pressed={autoNext}
             className={`btn btn-outline ${autoNext ? 'btn-autonext-on' : ''}`}
@@ -1027,7 +1062,19 @@ function Player({ target, onNavigate, active = true }) {
             aria-busy={!canPlay || mediaBuffering}
             controls
             onLoadedMetadata={handleMetadata}
-            onPlay={(event) => { if (!canPlay || playbackVersion !== mediaVersion.current) event.currentTarget.pause(); }}
+            onPlay={(event) => {
+              const media = loadedMediaRef.current;
+              if (!canPlay || playbackVersion !== mediaVersion.current || !media || media.version !== mediaVersion.current || media.element !== event.currentTarget) {
+                event.currentTarget.pause();
+                return;
+              }
+            }}
+            onRateChange={(event) => {
+              const v = event.currentTarget;
+              if (!canPlay || v !== videoRef.current || v.readyState === 0 || loadedMediaRef.current?.version !== mediaVersion.current) return;
+              if (v.currentSrc && v.currentSrc !== videoSrc) return;
+              if (v.playbackRate !== playbackRateRef.current) changePlaybackRate(v.playbackRate);
+            }}
             onEnded={() => { if (canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded(); }}
             onPause={() => persistPosition(true)}
             onPlaying={handlePlaying}
@@ -1214,7 +1261,7 @@ function Player({ target, onNavigate, active = true }) {
       </div>
 
       <div className="player-tips">
-        快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · ↑ ↓ 上一集/下一集 · A 切换连播。
+        快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · ↑ ↓ 上一集/下一集 · A 切换连播 · S 减速 / D 加速 0.25 倍（0.25–4 倍）。
         <br />
         <b>未锁定的灰色分集点一下即可在线播放</b>（不保存到下载目录）；双击才加入下载队列。
         连播时遇到未下载的集会自动转在线播放。

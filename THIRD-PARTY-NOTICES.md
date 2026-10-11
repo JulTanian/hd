@@ -12,7 +12,7 @@
 | Electron | 44.6.0 | MIT | https://github.com/electron/electron |
 | React | 18.3.1 | MIT | https://github.com/facebook/react |
 | React DOM | 18.3.1 | MIT | https://github.com/facebook/react |
-| axios | ^1.13.2 | MIT | https://github.com/axios/axios |
+| axios | 1.20.0 | MIT | https://github.com/axios/axios |
 
 Electron 打包产物中已包含 Chromium 与 Node.js 的许可声明：
 

@@ -12,7 +12,12 @@ function mount({ local = false, saved = null, transcode, prepare, props = {} } =
   let cursor = 0, tree, timerId = 0, oldSrc = '', oldKey;
   let transcodeProgress;
   const media = { currentTime: 0, duration: 100, readyState: 0, videoWidth: 640, paused: false,
-    play: async () => { media.paused = false; }, pause: () => { media.paused = true; },
+    play: async () => {
+      media.paused = false;
+      const video = find(n => n.type === 'video');
+      video?.props.onPlay?.({ currentTarget: media });
+      if (!media.paused) video?.props.onPlaying?.({ currentTarget: media });
+    }, pause: () => { media.paused = true; },
     load: () => { media.currentTime = 0; media.readyState = 0; media.currentSrc = ''; media.paused = true; },
     addEventListener: (name, fn) => mediaEvents.set(name, fn), removeEventListener: name => mediaEvents.delete(name) };
   const changed = (old, deps) => !old || deps.some((d, i) => !Object.is(d, old[i]));
@@ -67,7 +72,9 @@ function mount({ local = false, saved = null, transcode, prepare, props = {} } =
     unmount: () => cleanups.forEach(fn => fn?.()) };
 }
 
-(async () => {
+module.exports = { mount };
+
+if (require.main === module) (async () => {
   let failures = 0;
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
   await test('saved online episode resumes after metadata', async () => {

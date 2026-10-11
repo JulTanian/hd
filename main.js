@@ -8,7 +8,7 @@
  *   4. 下载管理：进度推送、暂停/取消、重试、删除、打开所在文件夹
  *   5. 设置：下载目录、命名规则、并发数（JSON 文件持久化）
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, session, protocol, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, protocol, Menu, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -20,6 +20,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const hongguo = require('./src/native/hongguo');
 const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const store = require('./src/store');
+const watchHistory = require('./src/native/watch-history');
 const APP_VERSION = app.getVersion() || '1.0.0';
 
 const APP_TITLE = '红果短剧';
@@ -130,6 +131,9 @@ function getDefaultSettings() {
     auto_delete_watched: false,
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
+    watch_updates_enabled: true,
+    watch_sequels_enabled: true,
+    watch_notifications_enabled: false,
     // ===== 网络代理 =====
     // proxy_enabled: 是否启用代理（关闭时忽略系统代理，直连）
     // proxy_mode:    system=跟随系统/环境变量 · custom=手动指定 · direct=强制直连
@@ -850,6 +854,10 @@ const BROWSE_CATEGORIES = [
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
   { slug: 'comic', label: '漫画' },
+  { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
+  { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
+  { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },
+  { slug: 'hot-ai-drama', label: 'AI 热播榜', group: 'rank' },
 ];
 
 ipcMain.handle('browse-categories', async () => BROWSE_CATEGORIES);
@@ -1440,11 +1448,10 @@ ipcMain.handle('get-series-episodes', async (event, seriesId) => {
 // 断点续播
 ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, currentTime) => {  try {
     const map = store.getPlayback() || {};
-    map[String(seriesId)] = {
-      vid_index: Number(vidIndex) || 1,
-      currentTime: Number(currentTime) || 0,
-      updatedAt: Date.now(),
-    };
+    const sid = String(seriesId);
+    const series = seriesRegistry.find(item => String(item.series_id) === sid);
+    if (!series) return { success: false, error: '未找到短剧档案' };
+    map[sid] = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime));
     store.savePlayback(map);
     return { success: true };
   } catch (error) {
@@ -1463,9 +1470,15 @@ ipcMain.handle('get-playback-position', async (event, seriesId) => {
  */
 ipcMain.handle('play-series', async (event, payload) => {
   const { seriesId, vidIndex } = payload || {};
+  const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
+  if (!entry) return { success: false, error: '未找到短剧档案，请重新打开详情' };
+  if (payload?.resume === true && entry.dismissed) {
+    try { entry.dismissed = false; saveSeriesRegistry(); }
+    catch (error) { entry.dismissed = true; return { success: false, error: error.message }; }
+  }
   sendToRenderer('navigate', {
     page: 'player',
-    payload: { seriesId: seriesId ? String(seriesId) : '', vidIndex: Number(vidIndex) || 0 },
+    payload: { seriesId: seriesId ? String(seriesId) : '', vidIndex: Number(vidIndex) || 0, resume: payload?.resume === true },
   });
   return { success: true };
 });
@@ -2271,6 +2284,108 @@ ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex) => {
   }
 });
 
+// ===== 观看记录与更新检测 =====
+let historyRefresh = null;
+const HISTORY_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+
+function historyRows() {
+  return watchHistory.listHistory(seriesRegistry, store.getPlayback(), getCurrentSettings().watch_sequels_enabled !== false);
+}
+
+async function refreshWatchHistory(force = false) {
+  if (historyRefresh) return historyRefresh;
+  if (!force && getCurrentSettings().watch_updates_enabled === false) return { success: true, checked: 0, disabled: true };
+  historyRefresh = (async () => {
+    const now = Date.now();
+    const due = historyRows().filter(item => force || now - item.lastCheckedAt >= HISTORY_CHECK_INTERVAL)
+      .sort((a, b) => a.lastCheckedAt - b.lastCheckedAt);
+    const batch = due.slice(0, 20);
+    let checked = 0, failed = 0;
+    for (const row of batch) {
+      const sid = String(row.series_id);
+      const oldSeries = seriesRegistry.find(item => String(item.series_id) === sid);
+      try {
+        const fresh = await hongguo.fetchEpisodeList(sid);
+        if (!Array.isArray(fresh?.episodes) || !fresh.episodes.length) throw new Error('来源没有返回分集，请稍后重试');
+        const settings = getCurrentSettings();
+        let candidates = null, sequelError = '';
+        const previous = store.getPlayback()[sid];
+        if (settings.watch_sequels_enabled !== false && (force || now - (previous?.lastSequelCheckAt || 0) >= 24 * 60 * 60 * 1000)) {
+          try {
+            const keyword = watchHistory.sequelKeyword(oldSeries);
+            const response = sid.startsWith('xifan:') ? await require('./src/native/xifan').search(keyword)
+              : sid.startsWith('hema:') ? await require('./src/native/hema').search(keyword) : await runSearchSniff(keyword);
+            if (!response?.success) throw new Error(response?.error || '搜索暂不可用');
+            candidates = watchHistory.findSequels(oldSeries, response.results || []);
+          } catch (error) { sequelError = `新集已检查；续作检查失败：${error.message}`; }
+        }
+        // Re-read after network waits: a concurrent player save must not be rolled back.
+        const map = store.getPlayback();
+        if (!map[sid]) continue;
+        const previousRecord = map[sid];
+        const next = watchHistory.applyEpisodeUpdate(previousRecord, oldSeries, fresh);
+        if (candidates) {
+          const combined = new Map((previousRecord.sequels || []).map(item => [item.series_id, item]));
+          for (const item of candidates) combined.set(item.series_id, item);
+          next.sequels = [...combined.values()].slice(-20);
+          next.lastSequelCheckAt = Date.now();
+        }
+        next.lastCheckError = sequelError;
+        const newEpisodes = next.knownTotal > (previousRecord.knownTotal ?? oldSeries.total ?? oldSeries.episodes.length);
+        const knownSequels = new Set((previousRecord.sequels || []).map(item => item.series_id));
+        const newSequel = candidates?.some(item => !knownSequels.has(item.series_id));
+        if (fresh.episodes.length >= oldSeries.episodes.length) {
+          const wasDismissed = oldSeries.dismissed === true;
+          upsertSeriesRegistry(fresh);
+          if (wasDismissed) {
+            seriesRegistry.find(item => String(item.series_id) === sid).dismissed = true;
+            saveSeriesRegistry();
+          }
+        }
+        map[sid] = next;
+        store.savePlayback(map);
+        checked++;
+        if (sequelError) failed++;
+        if ((newEpisodes || newSequel) && settings.watch_notifications_enabled === true && Notification?.isSupported()) {
+          try {
+            const notification = new Notification({ title: `${oldSeries.series_title} 有更新`,
+              body: newEpisodes ? `已更新至 ${next.knownTotal} 集，打开观看记录继续看。` : '发现疑似新一季，打开观看记录查看。' });
+            notification.on('click', () => {
+              if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show(); mainWindow.focus();
+              sendToRenderer('navigate', { page: 'history' });
+            });
+            notification.show();
+          } catch (error) { console.warn('[History] 系统通知不可用:', error.message); }
+        }
+      } catch (error) {
+        failed++;
+        const map = store.getPlayback();
+        if (map[sid]) {
+          map[sid] = { ...map[sid], lastCheckedAt: Date.now(), lastCheckError: error.message };
+          store.savePlayback(map);
+        }
+      }
+    }
+    sendToRenderer('watch-history-updated', {});
+    return { success: true, checked, failed, remaining: Math.max(0, due.length - batch.length) };
+  })().catch(error => ({ success: false, error: error.message })).finally(() => { historyRefresh = null; });
+  return historyRefresh;
+}
+
+ipcMain.handle('get-watch-history', async () => ({ success: true, results: historyRows() }));
+ipcMain.handle('refresh-watch-history', async () => refreshWatchHistory(true));
+ipcMain.handle('acknowledge-watch-updates', async (_event, seriesId, snapshot) => {
+  try {
+    const map = store.getPlayback();
+    const sid = String(seriesId);
+    if (map[sid]) { map[sid] = watchHistory.acknowledge(map[sid], snapshot); store.savePlayback(map); }
+    sendToRenderer('watch-history-updated', {});
+    return { success: true };
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
 // ===== IPC：设置 =====
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
@@ -2927,6 +3042,8 @@ app.whenReady().then(async () => {
     ]));
   }
   createWindow();
+  setTimeout(() => { void refreshWatchHistory(); }, 10000).unref();
+  setInterval(() => { void refreshWatchHistory(); }, 15 * 60 * 1000).unref();
 });
 
 app.on('window-all-closed', () => {

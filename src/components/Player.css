@@ -31,6 +31,24 @@
   flex-wrap: wrap;
 }
 
+.player-speed-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.player-speed-control select {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+}
+
 .player-stat {
   font-size: 13px;
   color: var(--text-secondary);

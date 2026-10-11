@@ -257,35 +257,74 @@ async function fetchPlayUrlFromWeb(vid, sid) {
 /**
  * 分享链接 -> series_id
  */
+function shareHttpUrl(value, base) {
+  // Validate before Axios or URL parsing: network timeouts cannot stop synchronous data: parsing.
+  if (typeof value !== 'string' || value.length > 4096 || /[\s\\]/.test(value)) {
+    throw new Error('分享链接无效或过长');
+  }
+  let url;
+  try { url = new URL(value, base); }
+  catch (_) { throw new Error('请输入有效的 HTTP 或 HTTPS 分享链接'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.href.length > 4096) {
+    throw new Error('仅支持不含账号密码的 HTTP 或 HTTPS 分享链接');
+  }
+  return url.href;
+}
+
 async function resolveSeriesId(shareUrl) {
-  const trimmed = String(shareUrl || '').trim();
-  if (/^\d+$/.test(trimmed)) {
-    return trimmed;
+  if (typeof shareUrl !== 'string' || shareUrl.length > 8192) throw new Error('分享内容无效或过长');
+  const trimmed = shareUrl.trim();
+  if (/^\d{1,30}$/.test(trimmed)) return trimmed;
+  const link = trimmed.match(/https?:\/\/[^\s<>"'，。！？；、【】（）]+/i)?.[0];
+  if (!link) throw new Error('请输入有效的 HTTP 或 HTTPS 分享链接，或剧集 ID');
+  let finalUrl = shareHttpUrl(link.replace(/[),.;!]+$/, ''));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  let bodyText;
+  try {
+    for (let redirects = 0; ; redirects++) {
+      const res = await axios.get(finalUrl, {
+        headers: { 'User-Agent': WEB_UA },
+        adapter: 'http',
+        timeout: 25000,
+        signal: controller.signal,
+        responseType: 'text',
+        transformResponse: [(data) => data],
+        maxContentLength: 2 * 1024 * 1024,
+        maxBodyLength: 1024,
+        // Follow manually so every Location is bounded and validated before Axios sees it.
+        maxRedirects: 0,
+        validateStatus: (status) => (status >= 200 && status < 300) || [301, 302, 303, 307, 308].includes(status),
+      });
+      if (res.status >= 300 && res.status < 400) {
+        if (redirects >= 5) throw new Error('分享链接跳转次数过多');
+        finalUrl = shareHttpUrl(res.headers.location, finalUrl);
+        continue;
+      }
+      bodyText = typeof res.data === 'string' ? res.data : '';
+      break;
+    }
+  } catch (_) {
+    throw new Error(controller.signal.aborted ? '分享链接加载超时，请重试' : '分享链接加载失败，请检查链接后重试');
+  } finally { clearTimeout(timer); }
+
+  const url = new URL(finalUrl);
+  const seriesId = url.searchParams.get('video_series_id');
+  if (/^\d{1,30}$/.test(seriesId || '')) return seriesId;
+  const player = url.pathname.match(/^\/player\/(\d{1,30})(?:\/|$)/);
+  if (player) return player[1];
+  const schemeParams = url.searchParams.get('schemeParams');
+  if (schemeParams) {
+    try {
+      const raw = decodeURIComponent(schemeParams);
+      const match = raw.match(/"video_id"\s*:\s*"(\d{1,30})"/);
+      if (match) return match[1];
+    } catch (_) { /* Malformed optional parameters must not hide valid page data. */ }
   }
-  const res = await axios.get(trimmed, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Linux; Android 9; SM-N9860) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.152 Mobile Safari/537.36",
-    },
-    timeout: 25000,
-    maxRedirects: 10,
-  });
-
-  const finalUrl = res.request?.res?.responseUrl || res.config?.url || trimmed;
-  let m = finalUrl.match(/video_series_id=(\d+)/);
-  if (m) return m[1];
-
-  m = finalUrl.match(/schemeParams[^&]*/);
-  if (m) {
-    const raw = decodeURIComponent(decodeURIComponent(m[0]));
-    const jm = raw.match(/"video_id"\s*:\s*"(\d+)"/);
-    if (jm) return jm[1];
-  }
-
-  const bodyText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data || '');
-  m = bodyText.match(/video_series_id=(\d+)/) || bodyText.match(/"video_id"\s*:\s*"(\d+)"/) || bodyText.match(/"series_id"\s*:\s*"(\d+)"/);
-  if (m) return m[1];
-
-  throw new Error("无法从链接解析 series_id: " + finalUrl);
+  const match = bodyText.match(/video_series_id=(\d{1,30})(?!\d)/)
+    || bodyText.match(/"(?:video_id|series_id)"\s*:\s*"(\d{1,30})"/);
+  if (match) return match[1];
+  throw new Error('无法从分享链接解析剧集 ID');
 }
 
 /**

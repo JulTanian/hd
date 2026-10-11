@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.6"><img alt="版本 1.1.6" src="https://img.shields.io/badge/release-v1.1.6-c8383d?style=flat-square"></a>
+  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.7"><img alt="版本 1.1.7" src="https://img.shields.io/badge/release-v1.1.7-c8383d?style=flat-square"></a>
   <img alt="macOS 13 或更新版本" src="https://img.shields.io/badge/macOS-13%2B-252523?style=flat-square">
   <img alt="Apple Silicon arm64" src="https://img.shields.io/badge/Apple_Silicon-arm64-252523?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 许可证" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.6"><img alt="v1.1.6 Developer ID 签名并通过 Apple 公证" src="https://img.shields.io/badge/v1.1.6-Developer_ID_%2B_Notarized-33745c?style=flat-square"></a>
+  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.7"><img alt="v1.1.7 Developer ID 签名并通过 Apple 公证" src="https://img.shields.io/badge/v1.1.7-Developer_ID_%2B_Notarized-33745c?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -35,11 +35,11 @@
 
 需要 **macOS 13 或更新版本、Apple Silicon（M 系列）Mac**。当前发行包为 arm64，应用已内置所需媒体工具，使用时无需安装 Node.js、Homebrew 或 FFmpeg。
 
-1. 打开 [最新版本下载页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)，在 **Assets** 中下载 `.dmg` 安装包。当前版本文件名为 `Hongguo-1.1.6-mac-arm64.dmg`。
+1. 打开 [最新版本下载页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)，在 **Assets** 中下载 `.dmg` 安装包。当前版本文件名为 `Hongguo-1.1.7-mac-arm64.dmg`。
 2. 打开 DMG，把「红果短剧」拖入「应用程序」，再从「应用程序」启动。
 3. 在「设置」中选择下载目录；进入「发现短剧」选择来源，或在「搜索与下载」中查找剧名，打开详情后选择分集。
 
-**正式 v1.1.6 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
+**正式 v1.1.7 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
 
 ## 从发现短剧到本地剧库
 
@@ -58,7 +58,7 @@
 
 在线播放不保存到下载目录。部分片源需要先准备临时媒体文件，应用会在使用后清理。播放地址和可用清晰度由来源服务决定；遇到不兼容的媒体，可使用内置兼容转码。
 
-播放器快捷键：`空格` 播放或暂停，`←` / `→` 后退或前进 5 秒，`↑` / `↓` 上一集或下一集，`A` 切换连播。
+播放器快捷键：`空格` 播放或暂停，`←` / `→` 后退或前进 5 秒，`↑` / `↓` 上一集或下一集，`A` 切换连播，`S` / `D` 每次减 / 加 0.25 倍。播放区可选 0.25–4 倍，切集和连播保持当前倍速；输入框与修饰键组合不会触发调速。
 
 ### 下载后，按需要合并
 
@@ -84,7 +84,17 @@
 
 ## 当前版本与验证范围
 
-[**v1.1.6 · 2026-10-07**](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.6) 在搜索/解析后的剧集详情增加“立即播放”，直接进入“我的剧库”；下载管理增加跨页“全选 / 取消全选”，并将整剧合并入口明确为“合并整部剧”，合并无需逐集勾选。
+[**v1.1.7 · 2026-10-11**](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.7) 完成四项社区反馈：
+
+- **红果热播榜**：综合、真人、漫剧、AI 四类榜单，显示官网排名与热度，支持分页；点击卡片可打开详情、播放和选集下载。
+- **观看记录**：只记录已实际开始播放的剧，按最近观看排序；显示集数与时间，点击继续上次进度。兼容旧版非零续播记录。
+- **追剧提醒**：运行期间分批检查新集；同来源、同名且更高季数的新剧标为“疑似续作”，可关闭。更新显示红点，打开后只确认当时看到的更新。系统通知默认关闭，可在设置开启；应用退出后不检查。
+- **倍速与快捷键**：0.25–4 倍共 16 档；S/D 每次减/加 0.25 倍，切集、连播保持；输入区域和修饰键组合不会触发调速。
+- **分享链接安全**：Axios 固定 1.20.0；限制输入长度、HTTP(S) 协议、链接凭据、跳转次数、响应大小和总等待时间。
+
+本轮 7 组定向回归通过，包含真实主进程 IPC 与临时存储检查；真实榜单分页和详情、隔离界面续播和倍速操作通过。安装包内源码、版本与依赖一致性已核对。未实测真实媒体音画、系统通知弹出和自然定时周期；续作标题匹配可能漏报或误报。
+
+保留 1.1.6 的详情“立即播放”、下载管理跨页“全选 / 取消全选”和“合并整部剧”入口。
 
 保留 1.1.5 的“全部来源”搜索，默认同时查询红果、西饭和河马，结果标明来源；单源失败保留其他结果。
 
@@ -144,7 +154,7 @@
 <details>
 <summary><strong>源码构建和正式安装包的签名有什么不同？</strong></summary>
 
-正式 v1.1.6 发行包经过 Developer ID 签名与 Apple 公证。默认源码构建使用 ad-hoc 签名，不会自动使用个人开发者证书或提交公证。自行构建的应用可能需要在「系统设置 → 隐私与安全性」确认打开；请先核对来源，无需全局关闭 Gatekeeper。
+正式 v1.1.7 发行包经过 Developer ID 签名与 Apple 公证。默认源码构建使用 ad-hoc 签名，不会自动使用个人开发者证书或提交公证。自行构建的应用可能需要在「系统设置 → 隐私与安全性」确认打开；请先核对来源，无需全局关闭 Gatekeeper。
 
 </details>
 
@@ -169,13 +179,13 @@ npm run build:mac
 | 开发模式 | `npm run dev` |
 | 仅生成 Mac 应用 | `npm run build:mac:dir` |
 | 应用产物 | `dist/mac-arm64/红果短剧.app` |
-| v1.1.6 DMG | `dist/红果短剧-1.1.6-mac-arm64.dmg` |
+| v1.1.7 DMG | `dist/红果短剧-1.1.6-mac-arm64.dmg` |
 
 ### FFmpeg 的准确对应源码
 
 Mac 包内置的 FFmpeg / FFprobe 基于 **FFmpeg 9.0.2** 与 **x264 `b35605ace3ddf7c1a5d67a2eb553f034aef41d55`** 的未修改源码编译。此构建为 **GPLv3-or-later**，仅静态链接 x264，保留 VideoToolbox，未启用 `nonfree`；动态依赖仅为 macOS 系统库，不依赖使用者的 Homebrew 环境。
 
-[对应版本的 Release](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.6) 附有**应用源码 ZIP**以及独立的 **FFmpeg/x264 完整对应源码包**，后者包含准确源码归档、构建脚本、清单与许可文本。只下载 GitHub 自动生成的项目源码归档，不能代替这一媒体工具对应源码包。
+[对应版本的 Release](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.7) 附有**应用源码 ZIP**以及独立的 **FFmpeg/x264 完整对应源码包**，后者包含准确源码归档、构建脚本、清单与许可文本。只下载 GitHub 自动生成的项目源码归档，不能代替这一媒体工具对应源码包。
 
 - [FFmpeg 来源、源码校验值与构建说明](build/ffmpeg/MACOS-NOTICE.txt)
 - [准确版本与构建配置](build/ffmpeg/MACOS-VERSIONS.txt)

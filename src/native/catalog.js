@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const SITE = 'https://hongguoduanju.com';
 const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
+const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
 const TIMEOUT_MS = 10000;
 const CACHE_MS = 30000;
 const cache = new Map();
@@ -56,11 +57,82 @@ function parseCatalog(html, category, page, sourceUrl) {
     genres, pageTitle, sourceUrl };
 }
 
+function decodeHtml(value) {
+  return String(value).replace(/&(#x[0-9a-f]+|#\d+|quot|apos|amp|lt|gt);/gi, (entity, key) => {
+    if (key[0] !== '#') return ({ quot: '"', apos: "'", amp: '&', lt: '<', gt: '>' })[key.toLowerCase()];
+    const code = key[1].toLowerCase() === 'x' ? parseInt(key.slice(2), 16) : Number(key.slice(1));
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  });
+}
+
+function parseRanking(html, category, page, sourceUrl) {
+  const text = value => decodeHtml(String(value).replace(/<[^>]*>/g, ' ')).trim();
+  let data;
+  // Streaming SSR puts the public payload inside an HTML-encoded JSON argument.
+  // Parse its literals only; no remote functions or scripts are ever executed.
+  for (const script of String(html).matchAll(/<script\b([^>]*)>/gi)) {
+    if (!/data-fn-name=["']mergeLoaderData["']/.test(script[1])) continue;
+    const encoded = script[1].match(/data-fn-args=(?:"([^"]*)"|'([^']*)')/);
+    if (!encoded) continue;
+    try {
+      const args = JSON.parse(decodeHtml(encoded[1] ?? encoded[2]));
+      if (args[0] !== `rank_${category}/page` || !Array.isArray(args[1])) continue;
+      const content = args[1].find(item => item.key === 'content' && item.routerDataFnName === 'p');
+      if (content?.routerDataFnArgs?.[0]) data = JSON.parse(content.routerDataFnArgs[0]);
+    } catch (_) { /* Some streamed responses expose only their rendered cards. */ }
+  }
+  const seen = new Set();
+  const normalize = item => {
+    const id = String(item.seriesId || '');
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const rank = Number(item.rank);
+    if (!/^\d{6,}$/.test(id) || !title || !Number.isSafeInteger(rank) || rank < 1 || seen.has(id)) return null;
+    seen.add(id);
+    return { series_id: id, series_title: title,
+      cover: typeof item.cover === 'string' && /^https?:\/\//.test(item.cover) ? item.cover : '',
+      episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
+      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+      rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
+      url: `${SITE}/detail?series_id=${id}` };
+  };
+  let results = data?.isSuccess !== false && Array.isArray(data?.rankList) ? data.rankList.map(normalize).filter(Boolean) : [];
+  if (!results.length) {
+    // Some pages omit the resolved loader. Semantic headings and detail links remain in SSR HTML.
+    for (const match of String(html).matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi)) {
+      const article = match[1];
+      const heading = article.match(/<h2\b[^>]*\bid=["']rank-title-(\d+)["'][^>]*>([\s\S]*?)<\/h2>/i);
+      if (!heading || !article.includes(`/detail?series_id=${heading[1]}`)) continue;
+      const cover = article.match(/<img\b[^>]*\bsrc=(?:"([^"]*)"|'([^']*)')/i);
+      const tags = article.match(/<p\b[^>]*class=["'][^"']*pc-categories-[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
+      const item = normalize({ seriesId: heading[1], title: text(heading[2]),
+        rank: article.match(/<span\b[^>]*>\s*(\d+)\s*<\/span>/i)?.[1],
+        heatText: text(article).match(/[\d.,]+\s*[万亿]?\s*热度/)?.[0] || '',
+        cover: cover ? decodeHtml(cover[1] ?? cover[2]) : '',
+        tags: tags ? Array.from(tags[1].matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi), tag => text(tag[1])) : [],
+      });
+      if (item) results.push(item);
+    }
+  }
+  if (!results.length) throw new Error('来源榜单暂不可用，请重试或打开来源页面');
+  const nav = String(html).match(/<nav\b[^>]*aria-label=["']榜单分页["'][^>]*>([\s\S]*?)<\/nav>/i)?.[1] || '';
+  const current = Number(data?.pagination?.pageNum) || Number(nav.match(/aria-current=["']page["'][^>]*>(\d+)/)?.[1]) || page;
+  const pages = Array.from(nav.matchAll(/href=["']([^"']+)["']/g), match => {
+    try {
+      const url = new URL(decodeHtml(match[1]), SITE);
+      return url.origin === SITE && url.pathname === `/rank/${category}` ? Number(url.searchParams.get('page')) || 1 : 0;
+    } catch (_) { return 0; }
+  });
+  return { success: true, results, page: current, total: 0,
+    totalPages: Number(data?.pagination?.totalPages) || Math.max(current, ...pages),
+    genres: [], pageTitle: text(String(html).match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ''), sourceUrl };
+}
+
 async function browseList(options = {}) {
   const { category = 'real-drama', genre = '', page = 1, forceRefresh = false } = options || {};
-  if (!CATEGORIES.has(category) || (genre && !/^[a-z0-9-]+$/.test(genre))) return { success: false, error: '无效的目录分类或题材' };
+  const ranking = RANKINGS.has(category);
+  if ((!CATEGORIES.has(category) && !ranking) || (genre && (!/^[a-z0-9-]+$/.test(genre) || ranking))) return { success: false, error: '无效的目录分类或题材' };
   const pg = Math.max(1, Number.parseInt(page, 10) || 1);
-  const url = `${SITE}/category/${category}${genre ? `/${genre}` : ''}${pg > 1 ? `?page=${pg}` : ''}`;
+  const url = `${SITE}/${ranking ? 'rank' : 'category'}/${category}${genre ? `/${genre}` : ''}${pg > 1 ? `?page=${pg}` : ''}`;
   if (!forceRefresh && cache.get(url)?.expires > Date.now()) return cache.get(url).data;
   if (pending.has(url)) return pending.get(url);
 
@@ -75,7 +147,7 @@ async function browseList(options = {}) {
       const response = await Promise.race([axios.get(url, {
         timeout: TIMEOUT_MS, signal: controller.signal, responseType: 'text', maxContentLength: 8 * 1024 * 1024,
       }), timeout]);
-      const data = parseCatalog(response.data, category, pg, url);
+      const data = (ranking ? parseRanking : parseCatalog)(response.data, category, pg, url);
       cache.set(url, { expires: Date.now() + CACHE_MS, data });
       // Bound memory while retaining the latest category/filter pages.
       if (cache.size > 32) cache.delete(cache.keys().next().value);

@@ -62,6 +62,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('save-playback-position', seriesId, vidIndex, currentTime),
   getPlaybackPosition: (seriesId) => ipcRenderer.invoke('get-playback-position', seriesId),
 
+  // 观看记录
+  getWatchHistory: () => ipcRenderer.invoke('get-watch-history'),
+  refreshWatchHistory: () => ipcRenderer.invoke('refresh-watch-history'),
+  acknowledgeWatchUpdates: (seriesId, snapshot) => ipcRenderer.invoke('acknowledge-watch-updates', seriesId, snapshot),
+  onWatchHistoryUpdated: (cb) => {
+    const listener = (_event, data) => cb(data);
+    ipcRenderer.on('watch-history-updated', listener);
+    return () => ipcRenderer.removeListener('watch-history-updated', listener);
+  },
+
   // 一键合并
   getFfmpegStatus: () => ipcRenderer.invoke('get-ffmpeg-status'),
   mergeSeries: (seriesId, outputName, options) => ipcRenderer.invoke('merge-series', seriesId, outputName, options),

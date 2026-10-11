@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Film, Download, Settings, Play, Home, Search } from './components/icons';
+import { Film, Download, Settings, Play, Home, Search, Clock } from './components/icons';
 import HongguoDownload from './components/HongguoDownload';
 import DownloadManager from './components/DownloadManager';
 import SettingsPage from './components/Settings';
 import Player from './components/Player';
 import Browse from './components/Browse';
+import WatchHistory from './components/WatchHistory';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
+  { id: 'history', label: '观看记录', icon: Clock },
   { id: 'manager', label: '下载管理', icon: Download },
   { id: 'settings', label: '设置', icon: Settings },
 ];
@@ -53,6 +55,8 @@ export default function App() {
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
         return <Player active={page === id} target={playerTarget} onNavigate={navigate} />;
+      case 'history':
+        return <WatchHistory active={page === id} onNavigate={navigate} />;
       case 'manager':
         return <DownloadManager active={page === id} onNavigate={navigate} />;
       case 'settings':
