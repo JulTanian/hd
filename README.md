@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-支持 **M 系列 Mac（Apple Silicon / arm64）、Intel Mac（x64）和 Windows x64**。红果、西饭、河马三个来源统一搜索，提供海报目录、选集播放与下载、本地剧库、观看记录、追剧提醒及 MP4 合并导出。
+**1.2 正式版已发布**，支持 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。
 
-**1.2 正式版已发布**，支持 M 系列 Mac、Intel Mac 和 Windows x64。[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2)，或先看下面的完整功能视频。
+[下载 1.2 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) · [观看功能介绍](#12-功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -37,9 +37,11 @@
 
 https://github.com/user-attachments/assets/00c170bf-11de-4317-b70c-dca3c5f74af8
 
-视频介绍画面缩放、保持宽度、隐藏播放器边框、窗口置顶，以及搜索、播放、下载与更新提醒。可直接在本页播放完整视频（约1分42秒，1.5倍速；720p，约5.66 MB），也可[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)。软件、源码与视频均已在 [1.2正式发行页](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) 提供。
+约 1 分 42 秒，介绍画面缩放、窗口置顶、搜索下载与更新提醒。
 
-分享与推广统一使用本仓库首页：**https://github.com/jackotom/hongguo-drama**。
+[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2)
+
+分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
 ## 安装与开始使用
 
