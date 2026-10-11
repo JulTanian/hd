@@ -31,6 +31,16 @@
 
 <p align="center"><sub>v1.1.3 实际应用界面 · 红果来源</sub></p>
 
+## 1.2 功能介绍视频
+
+点击封面观看完整介绍：重点演示竖屏画面自适应、保持宽度、隐藏边框和窗口置顶，同时介绍搜索、播放、下载管理与更新提醒。
+
+[![红果短剧 1.2 正式更新视频](docs/screenshots/hongguo-1.2-promo.jpg)](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)
+
+[观看 / 下载视频（约1分45秒）](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件](https://github.com/jackotom/hongguo-drama-mac/releases/latest)
+
+分享与推广请统一使用本仓库首页：**https://github.com/jackotom/hongguo-drama-mac**。
+
 ## 安装与开始使用
 
 需要 **macOS 13 或更新版本的 Apple Silicon（M 系列）或 Intel Mac**。请按芯片选择 arm64 或 x64 安装包，应用已内置所需媒体工具，使用时无需安装 Node.js、Homebrew 或 FFmpeg。
