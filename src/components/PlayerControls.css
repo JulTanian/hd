@@ -30,3 +30,6 @@
 .player-stage:fullscreen .player-video { object-fit: contain; }
 .player-stage:fullscreen .player-controls { padding: 28px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
 @media (max-width: 480px) { .player-controls { padding-inline: 8px; } .player-controls-row { gap: 3px; } .player-controls-volume input { width: 45px; } .player-controls-time { font-size: 11px; } }
+
+.player-controls-menu .player-picture-mode { margin-top: 12px; }
+.player-controls-menu .player-picture-mode select { width: 100px; }

@@ -72,3 +72,9 @@ dist-signed/
 # Windows build records
 WINDOWS_HANDOFF.md
 media/
+
+# Local release and preview material
+verification/
+rollback/
+dist-local/
+HANDOFF.md

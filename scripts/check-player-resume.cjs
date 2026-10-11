@@ -6,7 +6,7 @@ const path = require('node:path');
 const { transformSync } = require('esbuild');
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
-function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2 } = {}) {
+function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A' } = {}) {
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
   const events = new Map(), mediaEvents = new Map(), timers = new Map();
   const listenerOptions = new Map(), mediaCalls = { play: 0, pause: 0 };
@@ -37,8 +37,8 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   react.useCallback = (fn, deps) => react.useMemo(() => fn, deps);
   const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => ({ vid_index: n, vid: `v${n}`, status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
   const api = {
-    getSeriesList: async () => [{ series_id: 'A' }],
-    getSeriesEpisodes: async () => ({ success: true, data: { series_id: 'A', series_title: '测试剧', total: episodeCount, episodes } }),
+    getSeriesList: async () => [{ series_id: seriesId }],
+    getSeriesEpisodes: async () => ({ success: true, data: { series_id: seriesId, series_title: '测试剧', total: episodeCount, episodes } }),
     getPlaybackPosition: async () => saved,
     savePlaybackPosition: async (...args) => saves.push(args),
     prepareOnlinePlay: async p => { prepares.push(p); return prepare ? prepare(p) : { success: true, url: `hongguo-stream://mock-${prepares.length}` }; },
@@ -50,7 +50,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     clearCompatCache: async () => ({ success: true, count: 1 }),
     clearOnlineCache: async () => ({ success: true }),
   };
-  const window = { electronAPI: new Proxy(api, { get: (o, k) => o[k] || (k.startsWith('on') ? () => () => {} : async () => ({})) }),
+  const window = { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }, electronAPI: new Proxy(api, { get: (o, k) => o[k] || (k.startsWith('on') ? () => () => {} : async () => ({})) }),
     addEventListener: (k, f, options) => { events.set(k, f); listenerOptions.set(k, options); },
     removeEventListener: k => { events.delete(k); listenerOptions.delete(k); } };
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };

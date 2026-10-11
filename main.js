@@ -23,6 +23,7 @@ const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const { fitWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
+const { availableRelease } = require('./src/native/app-update');
 const APP_VERSION = app.getVersion() || '1.0.0';
 
 const APP_TITLE = '红果短剧';
@@ -133,6 +134,7 @@ function getDefaultSettings() {
     auto_delete_watched: false,
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
+    app_updates_enabled: true,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -2400,8 +2402,12 @@ ipcMain.handle('get-settings', async () => getCurrentSettings());
 
 ipcMain.handle('save-settings', async (event, settings) => {
   try {
+    const wasCheckingUpdates = getCurrentSettings().app_updates_enabled !== false;
     const merged = { ...getDefaultSettings(), ...(settings || {}) };
     store.saveSettings(merged);
+    if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
+      sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);
+    }
     getCurrentSettings(); // 刷新并发数
     await applyProxySettings(merged); // 立即生效，无需重启
     return { success: true };
@@ -2917,6 +2923,35 @@ ipcMain.handle('open-folder', async (event, taskId) => {
     }
   }
   return { success: false, error: '文件夹不存在' };
+});
+
+// ===== 可关闭的新版本提醒：只检测，不下载或安装 =====
+let updateRequest = null;
+let latestAppRelease = null;
+ipcMain.handle('check-app-update', async event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
+  if (getCurrentSettings().app_updates_enabled === false) {
+    latestAppRelease = null;
+    return { enabled: false, release: null };
+  }
+  if (!updateRequest) {
+    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama-mac/releases/latest', {
+      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
+    }).then(response => availableRelease(response.data, APP_VERSION)).catch(() => null)
+      .finally(() => { updateRequest = null; });
+  }
+  const release = await updateRequest;
+  const enabled = getCurrentSettings().app_updates_enabled !== false;
+  latestAppRelease = enabled ? release : null;
+  return { enabled, release: latestAppRelease };
+});
+ipcMain.handle('open-app-update', async event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !latestAppRelease || getCurrentSettings().app_updates_enabled === false) {
+    return { success: false, error: '更新信息已失效，请稍后重试' };
+  }
+  try { await shell.openExternal(latestAppRelease.url); return { success: true }; }
+  catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 
 // ===== 应用信息 =====

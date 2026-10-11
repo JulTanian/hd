@@ -2,6 +2,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 应用信息 / 官网链接
+  checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
+  openAppUpdate: () => ipcRenderer.invoke('open-app-update'),
+  onAppUpdatePreference: cb => {
+    const listener = (_event, enabled) => cb(enabled);
+    ipcRenderer.on('app-update-preference', listener);
+    return () => ipcRenderer.removeListener('app-update-preference', listener);
+  },
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 

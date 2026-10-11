@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.9"><img alt="版本 1.1.9" src="https://img.shields.io/badge/release-v1.1.9-c8383d?style=flat-square"></a>
+  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.2"><img alt="版本 1.2" src="https://img.shields.io/badge/release-v1.2-c8383d?style=flat-square"></a>
   <img alt="macOS 13 或更新版本" src="https://img.shields.io/badge/macOS-13%2B-252523?style=flat-square">
   <img alt="Apple Silicon 与 Intel" src="https://img.shields.io/badge/Mac-arm64_%2B_x64-252523?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 许可证" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.9"><img alt="v1.1.9 Developer ID 签名并通过 Apple 公证" src="https://img.shields.io/badge/v1.1.9-Developer_ID_%2B_Notarized-33745c?style=flat-square"></a>
+  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.2"><img alt="v1.2 Developer ID 签名并通过 Apple 公证" src="https://img.shields.io/badge/v1.2-Developer_ID_%2B_Notarized-33745c?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -35,20 +35,20 @@
 
 需要 **macOS 13 或更新版本的 Apple Silicon（M 系列）或 Intel Mac**。请按芯片选择 arm64 或 x64 安装包，应用已内置所需媒体工具，使用时无需安装 Node.js、Homebrew 或 FFmpeg。
 
-1. 打开 [最新版本下载页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)，在 **Assets** 中下载 `.dmg` 安装包。M 系列选择 `Hongguo-1.1.9-mac-arm64.dmg`；Intel 选择 `Hongguo-1.1.9-mac-x64.dmg`。
+1. 打开 [最新版本下载页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)，在 **Assets** 中下载 `.dmg` 安装包。M 系列选择 `Hongguo-1.2-mac-arm64.dmg`；Intel 选择 `Hongguo-1.2-mac-x64.dmg`。
 2. 打开 DMG，把「红果短剧」拖入「应用程序」，再从「应用程序」启动。
 3. 在「设置」中选择下载目录；进入「发现短剧」选择来源，或在「搜索与下载」中查找剧名，打开详情后选择分集。
 
-**正式 v1.1.9 Mac 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
+**正式 v1.2 Mac 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
 
 ### Windows x64：双击即用
 
-- [下载单文件 EXE](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-win-x64.exe)：下载后双击，无需安装额外依赖。
-- [下载 ZIP 压缩包](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-win-x64.zip)：解压后运行其中同一个 EXE。
+- [下载单文件 EXE](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/hongguo-downloader-1.2.0-win-x64.exe)：下载后双击，无需安装额外依赖。
+- [下载 ZIP 压缩包](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/hongguo-downloader-1.2.0-win-x64.zip)：解压后运行其中同一个 EXE。
 
 首次启动会自动展开临时运行文件，设置和播放记录保存在用户资料目录。Windows EXE **未签名**，系统可能显示安全提示。
 已在 Windows Server 2022 x64 云端环境验证单文件启动、普通视频播放/暂停、横竖窗口、置顶、媒体架构与哈希；未在用户实体电脑验证，也未覆盖真实平台下载、GPU/HEVC 和长期稳定性。
-[Windows 完整应用源码](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-windows-source.zip)与独立 FFmpeg/x264 Windows 对应源码均随发行提供。构建说明见 [三端发行流程](docs/RELEASING.md)。
+[Windows 完整应用源码](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/hongguo-downloader-1.2.0-windows-source.zip)与独立 FFmpeg/x264 Windows 对应源码均随发行提供。构建说明见 [三端发行流程](docs/RELEASING.md)。
 
 ## 从发现短剧到本地剧库
 
@@ -93,14 +93,20 @@
 
 ## 当前版本与验证范围
 
-[**v1.1.9 · 2026-10-11**](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.1.9)
+[**v1.2 · 2026-10-11**](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.2)
 
-- 新增 Intel x64 安装包，与 Apple Silicon arm64 分开提供；各自内置匹配架构的 FFmpeg / ffprobe。
-- 支持横竖窗口切换、右侧一体选集、窗口置顶、隐藏操作行和去掉视频边框。
-- 修复竖屏顶部页面菜单被窗口顶边裁剪：六个入口固定向下完整展开，支持方向键、Home/End、Esc 与外点关闭。
-- 竖屏全屏填充当前窗口，不改变系统窗口尺寸；播放控件闲置两秒隐藏，暂停、打开菜单或拖动进度时保留。
+- 播放器更多菜单新增「画面模式」。默认「适应窗口」完整显示，随可用窗口尺寸按比例缩放。
+- 「保持宽度」按可用宽度保持画面比例；只缩短高度时画面不变小，超出的上下部分会裁剪。每部剧单独记忆，随时切换，保留播放进度。
+- 设置新增「自动检测更新」，默认开启。启动及运行期间每6小时检测GitHub正式新版；可取消勾选保存关闭。提醒右上角×可关闭，旧版照常使用；仅跳转发行页，不自动下载安装。
+- 保留横竖布局、右侧一体选集、去掉视频边框、隐藏操作行、窗口置顶、窗口内全屏与独立倍速按钮。
 
-菜单已在真实 Electron 窗口的 420/450 像素宽度下验证六项可见、键盘选择与关闭行为。Apple Silicon 本机与 Intel Rosetta 验证分别记录于发行说明；未进行真实 Intel 硬件、长时间播放或人工听音验收。
+本轮覆盖三种视频比例的画面缩放、按剧记忆、节点/进度连续、换集/窗口内全屏/去边框；更新检测覆盖版本比较、开关保存、关闭提醒与失败分支。Windows运行与Mac发行包校验结果见本版发行说明。未进行真实Intel或用户Windows实体电脑、长时间播放、人工听音及启用Gatekeeper的干净系统验收。
+
+## 1.1.9 历史变更
+
+- 新增Intel x64安装包与Windows x64便携版；三端独立构建并记录验证范围。
+- 横竖布局、窗口置顶、隐藏操作行、去边框与右侧一体选集。
+- 竖屏顶部导航菜单固定向下展开，窗口内全屏与闲置控件隐藏。
 
 ## 1.1.8 历史变更与当时验证
 

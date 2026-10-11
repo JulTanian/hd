@@ -18,6 +18,18 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   useEffect(() => { if (!portrait || !active) setWindowFill(false); }, [portrait, active]);
   const [seriesList, setSeriesList] = useState([]);
   const [activeSeriesId, setActiveSeriesId] = useState('');
+  const [pictureChoice, setPictureChoice] = useState(null);
+  const savedPictureMode = useMemo(() => {
+    try { return window.localStorage.getItem(`hongguo:picture-mode:${activeSeriesId}`) === 'width' ? 'width' : 'fit'; }
+    catch { return 'fit'; }
+  }, [activeSeriesId]);
+  const pictureMode = pictureChoice?.seriesId === activeSeriesId ? pictureChoice.mode : savedPictureMode;
+  const changePictureMode = mode => {
+    if (!activeSeriesId || !['fit', 'width'].includes(mode)) return;
+    setPictureChoice({ seriesId: activeSeriesId, mode });
+    try { window.localStorage.setItem(`hongguo:picture-mode:${activeSeriesId}`, mode); }
+    catch { showToast('画面模式已切换，但未能保存；下次打开可能恢复默认'); }
+  };
   const [detail, setDetail] = useState(null); // { series_title, episodes: [...], total, completedCount }
   const [currentIndex, setCurrentIndex] = useState(1);
   const [autoNext, setAutoNext] = useState(true);
@@ -1083,7 +1095,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
 
       <div className="player-viewing-layout">
       {/* 播放区 */}
-      <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} ref={stageRef}>
+      <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}>
           <video
             ref={videoRef}
             src={videoSrc || undefined}
@@ -1133,7 +1145,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             }}
           />
         <PlayerControls portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
-          rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
+          pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
             {playbackError ? (

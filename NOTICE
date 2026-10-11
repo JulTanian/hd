@@ -100,3 +100,5 @@ code was copied. Content rights remain with their respective owners.
 ----------------------------------------
 新增 Windows x64 固定源码媒体构建、单文件便携 EXE 与隔离运行验收工作流。
 Mac arm64、Mac x64、Windows x64 共用版本号；平台验证与签名状态分别记录。
+
+1.2 changes: per-series fit-window / keep-width picture modes; optional GitHub release notices without forced download or installation.

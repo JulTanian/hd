@@ -7,6 +7,7 @@ import Player from './components/Player';
 import Browse from './components/Browse';
 import PageMenu from './components/PageMenu';
 import WatchHistory from './components/WatchHistory';
+import AppUpdateNotice from './components/AppUpdateNotice';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -124,7 +125,7 @@ export default function App() {
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>设置</span>
           </button>
-          <div className="footer-note"><span>红果短剧</span><span>{appInfo?.version ? `v${appInfo.version}` : ''}</span></div>
+          <div className="footer-note"><span>红果短剧</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
         </div>
       </aside>
       <div className="main-wrapper">
@@ -168,6 +169,7 @@ export default function App() {
               onClick={() => navigate(item.id)} title={item.label}><Icon size={18} /><span>{item.label}</span></button>;
           })}
         </nav>
+        <AppUpdateNotice />
         {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>
