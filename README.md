@@ -2,10 +2,10 @@
   <img src="build/icon.png" alt="红果短剧 Mac 应用图标" width="112" height="112">
 </p>
 
-<h1 align="center">红果短剧 · Mac 短剧播放器与下载器</h1>
+<h1 align="center">红果短剧 · Mac 与 Windows 短剧播放器</h1>
 
 <p align="center">
-  在 Mac 上发现短剧、按集下载、接着观看，把已下载的分集合并为一个视频。
+  在 Mac 和 Windows 上发现短剧、按集下载、接着观看，把已下载的分集合并为一个视频。
 </p>
 
 <p align="center">
@@ -17,13 +17,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/latest"><strong>下载 Mac 版</strong></a> ·
+  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/latest"><strong>下载 Mac / Windows 版</strong></a> ·
   <a href="https://github.com/jackotom/hongguo-drama-mac">查看源码</a> ·
   <a href="https://github.com/jackotom/hongguo-drama-mac/issues">反馈问题</a> ·
   <a href="#安装与开始使用">安装说明</a>
 </p>
 
-**红果短剧**是一款面向 Apple Silicon 与 Intel 的开源 Mac 短剧播放器与下载器。支持红果、西饭与河马来源的剧名搜索、选集下载和本地剧库，三个来源均提供目录与题材浏览；播放进度、下载队列与合并导出都在同一个桌面应用里管理。
+**红果短剧**是一款支持 Apple Silicon、Intel Mac 与 Windows x64 的开源短剧播放器与下载器。支持红果、西饭与河马来源的剧名搜索、选集下载和本地剧库，三个来源均提供目录与题材浏览；播放进度、下载队列与合并导出都在同一个桌面应用里管理。
 
 这是社区维护的修改版本，**不是红果或西饭官方客户端，也未获平台官方背书**。Apple 公证是发行包的安全检查，不代表 App Store 审核或内容授权。
 
@@ -39,7 +39,16 @@
 2. 打开 DMG，把「红果短剧」拖入「应用程序」，再从「应用程序」启动。
 3. 在「设置」中选择下载目录；进入「发现短剧」选择来源，或在「搜索与下载」中查找剧名，打开详情后选择分集。
 
-**正式 v1.1.9 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
+**正式 v1.1.9 Mac 发行包已完成 Developer ID 签名与 Apple 公证。** 应用与 DMG 均已装订公证票据；应用启用了运行时加固和可信时间戳。发行页同时提供应用源码、FFmpeg/x264 对应源码及 `SHA256SUMS.txt`，方便核对下载文件。
+
+### Windows x64：双击即用
+
+- [下载单文件 EXE](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-win-x64.exe)：下载后双击，无需安装额外依赖。
+- [下载 ZIP 压缩包](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-win-x64.zip)：解压后运行其中同一个 EXE。
+
+首次启动会自动展开临时运行文件，设置和播放记录保存在用户资料目录。Windows EXE **未签名**，系统可能显示安全提示。
+已在 Windows Server 2022 x64 云端环境验证单文件启动、普通视频播放/暂停、横竖窗口、置顶、媒体架构与哈希；未在用户实体电脑验证，也未覆盖真实平台下载、GPU/HEVC 和长期稳定性。
+[Windows 完整应用源码](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.1.9/hongguo-downloader-1.1.9-windows-source.zip)与独立 FFmpeg/x264 Windows 对应源码均随发行提供。构建说明见 [三端发行流程](docs/RELEASING.md)。
 
 ## 从发现短剧到本地剧库
 
@@ -149,7 +158,7 @@
 <details>
 <summary><strong>可以在 Intel Mac 或 Windows 上使用吗？</strong></summary>
 
-1.1.9 提供 Apple Silicon arm64 与 Intel x64 两种 Mac 安装包。Intel 版已在 Rosetta 下验证，真实 Intel 硬件尚未验收。Windows 1.1.9 正在独立开发，完成前不将其标为已发布或已验收。
+1.1.9 提供 Apple Silicon arm64 与 Intel x64 两种 Mac 安装包。Intel 版已在 Rosetta 下验证，真实 Intel 硬件尚未验收。Windows x64 1.1.9 已提供单文件便携 EXE 与 ZIP，直接启动和播放器检查已在 Windows x64 云端环境通过；未做用户实体电脑验收。
 
 </details>
 
@@ -165,14 +174,14 @@
 
 先确认网络能访问来源平台，再检查「设置」中的代理模式：跟随系统、手动指定或强制直连。手动代理支持 HTTP/HTTPS；代理设置与实际网络不符可能导致取址或下载失败。适当降低下载并发数后重试，避免触发来源限流。
 
-如果持续失败，请在 [Issues](https://github.com/jackotom/hongguo-drama-mac/issues) 提供应用版本、macOS 版本、来源、操作步骤和错误提示。截图及日志请先移除账号信息、Cookie、代理凭据与个人文件路径。
+如果持续失败，请在 [Issues](https://github.com/jackotom/hongguo-drama-mac/issues) 提供应用版本、操作系统版本、来源、操作步骤和错误提示。截图及日志请先移除账号信息、Cookie、代理凭据与个人文件路径。
 
 </details>
 
 <details>
 <summary><strong>视频、任务和播放记录保存在哪里？</strong></summary>
 
-视频保存到「设置」里选择的下载目录，按来源与剧名组织。设置、任务和播放记录默认位于 `~/Library/Application Support/hongguo-downloader/`；若自行通过启动参数指定数据目录，则以指定目录为准。
+视频保存到「设置」里选择的下载目录，按来源与剧名组织。设置、任务和播放记录在 Mac 默认位于 `~/Library/Application Support/hongguo-downloader/`，Windows 默认位于 `%APPDATA%\hongguo-downloader\`；若自行通过启动参数指定数据目录，则以指定目录为准。
 
 在线播放不等于下载完成。想长期保留文件，请使用下载功能；清理文件和清理转码缓存是不同操作，删除前请核对应用提示。
 
@@ -181,7 +190,7 @@
 <details>
 <summary><strong>源码构建和正式安装包的签名有什么不同？</strong></summary>
 
-正式 v1.1.9 发行包经过 Developer ID 签名与 Apple 公证。默认源码构建使用 ad-hoc 签名，不会自动使用个人开发者证书或提交公证。自行构建的应用可能需要在「系统设置 → 隐私与安全性」确认打开；请先核对来源，无需全局关闭 Gatekeeper。
+正式 v1.1.9 Mac 发行包经过 Developer ID 签名与 Apple 公证。Windows EXE 未签名。默认源码构建使用 ad-hoc 签名，不会自动使用个人开发者证书或提交公证。自行构建的应用可能需要在「系统设置 → 隐私与安全性」确认打开；请先核对来源，无需全局关闭 Gatekeeper。
 
 </details>
 

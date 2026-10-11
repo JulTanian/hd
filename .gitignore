@@ -68,3 +68,7 @@ dist-signed/
 .planning/
 *.bak
 *.backup
+
+# Windows build records
+WINDOWS_HANDOFF.md
+media/
