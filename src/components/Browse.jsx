@@ -207,7 +207,7 @@ function Browse({ onNavigate, active = true }) {
   };
 
   const gotoPage = (p) => {
-    const max = source === 'xifan' ? page + (meta.hasMore ? 1 : 0) : meta.totalPages || 1;
+    const max = source !== 'hongguo' ? page + (meta.hasMore ? 1 : 0) : meta.totalPages || 1;
     const next = Math.min(Math.max(1, p), max);
     if (next === page) return;
     invalidateList();
@@ -343,7 +343,7 @@ function Browse({ onNavigate, active = true }) {
           <div><h2>发现短剧</h2><p className="page-description">挑一部喜欢的，让故事继续。</p></div>
         </div>
         <div className="browse-header-right">
-          <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}><option value="hongguo">红果短剧</option><option value="xifan">西饭短剧</option></select></label>
+          <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}><option value="hongguo">红果短剧</option><option value="xifan">西饭短剧</option><option value="hema">河马短剧</option></select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
           <button className="btn btn-outline" disabled={loading} onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />刷新片单</button>
           {meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
@@ -372,6 +372,8 @@ function Browse({ onNavigate, active = true }) {
         ))}
       </div>;
       })}
+
+      {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
       {/* 题材 chips */}
       {meta.genres.length > 0 && (
@@ -467,7 +469,7 @@ function Browse({ onNavigate, active = true }) {
         </div>
       )}
 
-      {source === 'xifan' && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
+      {source !== 'hongguo' && !totalPages && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
 
       {/* ===== 剧集详情抽屉 ===== */}
       {(detail || detailLoading) && (

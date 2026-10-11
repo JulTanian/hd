@@ -74,7 +74,7 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     assert.ok(ui.text().includes('已选 205 项')); assert.ok(rows(ui).every(r => r.props.className.includes('selected')));
     ui.button('下一页').props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render();
     assert.equal(rows(ui).length, 5); assert.ok(rows(ui).every(r => r.props.className.includes('selected')));
-    ui.button('取消全选').props.onClick(); ui.render(); assert.ok(rows(ui).every(r => !r.props.className.includes('selected'))); assert.equal(ui.button('删除选中').props.disabled, true);
+    ui.button('取消全选').props.onClick(); ui.render(); assert.ok(rows(ui).every(r => !r.props.className.includes('selected'))); assert.equal(ui.button('删除已选').props.disabled, true);
     rows(ui)[0].props.onClick(); ui.render(); ui.button('全选').props.onClick(); ui.render(); assert.ok(ui.text().includes('已选 205 项')); ui.unmount();
   });
   await test('whole-series merge needs no checked tasks and identifies its series', async () => {
@@ -88,12 +88,12 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     const ui = mount({ getDownloadTasks: async () => Array.from({ length: 205 }, (_, i) => task(i + 1, 'completed')) }); await ui.flush();
     assert.equal(rows(ui).length, 100); assert.ok(ui.text().includes('已完成 205'));
     rows(ui)[0].props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render(); assert.equal(rows(ui).length, 100);
-    rows(ui)[0].props.onClick(); ui.render(); ui.button('删除选中').props.onClick(); ui.render(); assert.ok(ui.text().includes('共 2 个任务'));
+    rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render(); assert.ok(ui.text().includes('共 2 个任务'));
     ui.button('取消').props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render(); assert.equal(rows(ui).length, 5); ui.unmount();
   });
   for (const rejected of [false, true]) await test(`delete ${rejected ? 'rejection' : 'failure response'} is visible and preserves selection`, async () => {
     const ui = mount({ getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => { if (rejected) throw new Error('删除失败示例'); return { success: false, error: '删除失败示例' }; } });
-    await ui.flush(); rows(ui)[0].props.onClick(); ui.render(); ui.button('删除选中').props.onClick(); ui.render();
+    await ui.flush(); rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
     await assert.doesNotReject(() => ui.button('仅删除记录').props.onClick(), 'delete rejection must become visible feedback'); await ui.flush();
     assert.ok(ui.text().includes('删除失败示例')); assert.ok(rows(ui)[0].props.className.includes('selected')); ui.unmount();
   });

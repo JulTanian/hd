@@ -6,18 +6,22 @@ const path = require('node:path');
 const { transformSync } = require('esbuild');
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
-function mount({ local = false, saved = null, transcode, prepare, props = {} } = {}) {
+function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2 } = {}) {
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
   const events = new Map(), mediaEvents = new Map(), timers = new Map();
+  const listenerOptions = new Map(), mediaCalls = { play: 0, pause: 0 };
+  const document = { activeElement: null, querySelector: () => null };
   let cursor = 0, tree, timerId = 0, oldSrc = '', oldKey;
   let transcodeProgress;
   const media = { currentTime: 0, duration: 100, readyState: 0, videoWidth: 640, paused: false,
     play: async () => {
+      mediaCalls.play++;
       media.paused = false;
       const video = find(n => n.type === 'video');
       video?.props.onPlay?.({ currentTarget: media });
       if (!media.paused) video?.props.onPlaying?.({ currentTarget: media });
-    }, pause: () => { media.paused = true; },
+    }, pause: () => { mediaCalls.pause++; media.paused = true; },
+    focus: () => { document.activeElement = media; },
     load: () => { media.currentTime = 0; media.readyState = 0; media.currentSrc = ''; media.paused = true; },
     addEventListener: (name, fn) => mediaEvents.set(name, fn), removeEventListener: name => mediaEvents.delete(name) };
   const changed = (old, deps) => !old || deps.some((d, i) => !Object.is(d, old[i]));
@@ -31,10 +35,10 @@ function mount({ local = false, saved = null, transcode, prepare, props = {} } =
   };
   // useCallback returns the callback, unlike useMemo.
   react.useCallback = (fn, deps) => react.useMemo(() => fn, deps);
-  const episodes = [1, 2].map(n => ({ vid_index: n, vid: `v${n}`, status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
+  const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => ({ vid_index: n, vid: `v${n}`, status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
   const api = {
     getSeriesList: async () => [{ series_id: 'A' }],
-    getSeriesEpisodes: async () => ({ success: true, data: { series_id: 'A', series_title: '测试剧', total: 2, episodes } }),
+    getSeriesEpisodes: async () => ({ success: true, data: { series_id: 'A', series_title: '测试剧', total: episodeCount, episodes } }),
     getPlaybackPosition: async () => saved,
     savePlaybackPosition: async (...args) => saves.push(args),
     prepareOnlinePlay: async p => { prepares.push(p); return prepare ? prepare(p) : { success: true, url: `hongguo-stream://mock-${prepares.length}` }; },
@@ -46,9 +50,11 @@ function mount({ local = false, saved = null, transcode, prepare, props = {} } =
     clearCompatCache: async () => ({ success: true, count: 1 }),
     clearOnlineCache: async () => ({ success: true }),
   };
-  const window = { electronAPI: new Proxy(api, { get: (o, k) => o[k] || (k.startsWith('on') ? () => () => {} : async () => ({})) }), addEventListener: (k, f) => events.set(k, f), removeEventListener: k => events.delete(k) };
+  const window = { electronAPI: new Proxy(api, { get: (o, k) => o[k] || (k.startsWith('on') ? () => () => {} : async () => ({})) }),
+    addEventListener: (k, f, options) => { events.set(k, f); listenerOptions.set(k, options); },
+    removeEventListener: k => { events.delete(k); listenerOptions.delete(k); } };
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : {}, window, document: { querySelector: () => null }, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -63,8 +69,21 @@ function mount({ local = false, saved = null, transcode, prepare, props = {} } =
   };
   const flush = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); render(); } };
   const metadata = () => { media.readyState = 1; media.currentSrc = media.src; find(n => n.type === 'video')?.props.onLoadedMetadata?.({ currentTarget: media }); mediaEvents.get('loadedmetadata')?.(); };
+  // Follow DOM propagation order; targetAction models a focused control's own listener.
+  const dispatchKey = (type, init, targetAction) => {
+    const event = { type, target: document.activeElement, defaultPrevented: false, propagationStopped: false,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.propagationStopped = true; },
+      stopImmediatePropagation() { this.propagationStopped = true; }, ...init };
+    const options = listenerOptions.get(type);
+    const capture = options === true || options?.capture === true;
+    if (capture) events.get(type)?.(event);
+    if (!event.propagationStopped) targetAction?.(event);
+    if (!capture && !event.propagationStopped) events.get(type)?.(event);
+    return event;
+  };
   render();
-  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers,
+  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
     transcodeProgress: payload => transcodeProgress?.(payload),
     button: label => find(n => n.type === 'button' && text(n).includes(label)),
     episode: n => find(x => x.props['aria-label'] === `第 ${n} 集`).props.onClick(),

@@ -863,7 +863,8 @@ const BROWSE_CATEGORIES = [
 ipcMain.handle('browse-categories', async () => BROWSE_CATEGORIES);
 
 ipcMain.handle('browse-list', (_event, options) =>
-  require(options?.source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options));
+  require(options?.source === 'hema' ? './src/native/hema'
+    : options?.source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options));
 
 ipcMain.handle('search-series', async (event, keyword, options = {}) => {
   const kw = String(keyword || '').trim();

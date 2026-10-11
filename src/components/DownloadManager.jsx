@@ -441,10 +441,6 @@ function DownloadManager({ onNavigate, active = true }) {
           <RefreshCw size={15} />
           重试选中 ({retryableSelectedCount})
         </button>
-        <button className="btn btn-outline" onClick={deleteSelected} disabled={selected.size === 0}>
-          <Trash2 size={15} />
-          删除选中
-        </button>
         <button className="btn btn-outline" onClick={clearCompleted} disabled={completedCount === 0}>
           <X size={15} />
           清空已完成
@@ -592,6 +588,10 @@ function DownloadManager({ onNavigate, active = true }) {
           <button className="btn btn-outline btn-sm" onClick={allSelected ? clearSelection : selectAll}
             title={allSelected ? '取消所有分页中的选择' : `选中全部 ${tasks.length} 项，包含其他分页`}>
             <CheckSquare size={15} />{allSelected ? '取消全选' : '全选'}
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={deleteSelected} disabled={selected.size === 0}
+            title="删除所有分页中已选的任务，确认时可选择是否同时删除本地文件">
+            <Trash2 size={15} />删除已选（{selected.size}项）
           </button>
         <span>共 {tasks.length} 项 · 当前 {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, tasks.length)} 项{selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : ''}</span>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
+import PlayerControls from './PlayerControls';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
 
@@ -49,6 +50,7 @@ function Player({ target, onNavigate, active = true }) {
   const [mergeAsk, setMergeAsk] = useState(false);            // 合并格式选择
 
   const videoRef = useRef(null);
+  const stageRef = useRef(null);
   const playbackRateRef = useRef(1);
   const toastTimer = useRef(null);
   const pendingSeekRef = useRef(0); // 切集后要跳转的秒数
@@ -585,39 +587,47 @@ function Player({ target, onNavigate, active = true }) {
     v.play().catch(() => {});
   };
 
-  // 快捷键
+  // Capture handled keys before media controls; cancel keyup too so focused buttons cannot toggle twice.
   useEffect(() => {
-    if (!active || confirmAsk || mergeAsk) return;
-    const onKey = (e) => {
-      const v = videoRef.current;
-      if (!v || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return;
-      if (e.target?.isContentEditable || e.target?.closest?.('input, button, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
-      const { currentIndex: ci, autoNext: an } = stateRef.current;
-      if (e.code === 'Space') {
-        e.preventDefault();
-        v.paused ? v.play().catch(() => {}) : v.pause();
-      } else if (e.key === 'ArrowRight') {
-        v.currentTime = Math.min(v.duration || 0, v.currentTime + 5);
-      } else if (e.key === 'ArrowLeft') {
-        v.currentTime = Math.max(0, v.currentTime - 5);
-      } else if (e.key === 'ArrowUp') {
-        const p = findPrev(ci);
-        if (p) {
-          goToEpisode(p.vid_index);
-        }
-      } else if (e.key === 'ArrowDown') {
-        const n = findNext(ci);
-        if (n) goToEpisode(n.vid_index);
-      } else if (e.key.toLowerCase() === 'a') {
-        setAutoNext(!an);
-      } else if (['s', 'd'].includes(e.key.toLowerCase())) {
-        e.preventDefault();
-        changePlaybackRate(playbackRateRef.current + (e.key.toLowerCase() === 's' ? -0.25 : 0.25));
-      }
+    if (!active || confirmAsk || mergeAsk || pickerOpen) return;
+    const held = new Set();
+    const keyName = event => event.code === 'Space' || event.key === ' ' ? 'space' : String(event.key || '').toLowerCase();
+    const onKey = (event) => {
+      const video = videoRef.current;
+      if (!video || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.isComposing) return;
+      const target = event.target;
+      if (target?.isContentEditable || target?.closest?.('input, select, textarea, [contenteditable]:not([contenteditable="false"]), [data-player-menu], [role="menu"], [role="menuitem"], [role="menuitemradio"], [role="listbox"]')) return;
+      if (target?.closest?.('button, a') && !target.closest('.player-container')) return;
+      const key = keyName(event);
+      if (!['space', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 's', 'd'].includes(key)) return;
+      event.preventDefault(); event.stopPropagation?.();
+      held.add(key);
+      if (event.repeat && ['space', 'arrowup', 'arrowdown', 'a'].includes(key)) return;
+      const { currentIndex: index, autoNext: nextEnabled } = stateRef.current;
+      if (key === 'space') {
+        if (video.paused) video.play().catch(() => showToast('暂时无法播放，请重试本集'));
+        else video.pause();
+      } else if (key === 'arrowright' || key === 'arrowleft') {
+        const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
+        video.currentTime = Math.max(0, Math.min(limit, video.currentTime + (key === 'arrowright' ? 5 : -5)));
+      } else if (key === 'arrowup' || key === 'arrowdown') {
+        const episode = key === 'arrowup' ? findPrev(index) : findNext(index);
+        if (episode) goToEpisode(episode.vid_index);
+        else showToast(key === 'arrowup' ? '已经是第一集' : '已经是最后一集');
+      } else if (key === 'a') setAutoNext(!nextEnabled);
+      else changePlaybackRate(playbackRateRef.current + (key === 's' ? -0.25 : 0.25));
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [active, confirmAsk, mergeAsk, findNext, findPrev, goToEpisode, changePlaybackRate]);
+    const onKeyUp = event => {
+      if (!held.delete(keyName(event))) return;
+      event.preventDefault(); event.stopPropagation?.();
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
+  }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast]);
 
   const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false) => {
     persistPosition(true);
@@ -827,12 +837,7 @@ function Player({ target, onNavigate, active = true }) {
         </div>
         <div className="player-header-right">
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
-          <label className="player-speed-control">
-            速度
-            <select aria-label="播放速度" title="S 减速 · D 加速，每次 0.25 倍" value={playbackRate} onChange={(e) => changePlaybackRate(e.target.value)}>
-              {Array.from({ length: 16 }, (_, i) => (i + 1) / 4).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
-            </select>
-          </label>
+
           <button
             aria-pressed={autoNext}
             className={`btn btn-outline ${autoNext ? 'btn-autonext-on' : ''}`}
@@ -1054,13 +1059,21 @@ function Player({ target, onNavigate, active = true }) {
       )}
 
       {/* 播放区 */}
-      <div className="player-stage">
+      <div className="player-stage" ref={stageRef}>
           <video
             ref={videoRef}
             src={videoSrc || undefined}
             className="player-video"
             aria-busy={!canPlay || mediaBuffering}
-            controls
+            tabIndex={0}
+            aria-label="视频画面，空格播放或暂停"
+            onClick={() => {
+              const video = videoRef.current;
+              if (!canPlay || !video) return;
+              video.focus({ preventScroll: true });
+              if (video.paused) video.play().catch(() => showToast('暂时无法播放，请重试本集'));
+              else video.pause();
+            }}
             onLoadedMetadata={handleMetadata}
             onPlay={(event) => {
               const media = loadedMediaRef.current;
@@ -1095,6 +1108,8 @@ function Player({ target, onNavigate, active = true }) {
               if (failedDecode && autoCompat && !compatUrl && autoCompatAttemptRef.current !== mediaVersion.current) startCompatPlay(currentIndex);
             }}
           />
+        <PlayerControls videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
+          rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
             {playbackError ? (

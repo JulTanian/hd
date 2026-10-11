@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const ORIGIN = 'https://www.kuaikaw.cn';
 const ID = /^\d{1,30}$/;
+let genreCache;
 
 function plainText(value) {
   return String(value || '').replace(/<[^>]*>/g, '').trim();
@@ -40,6 +41,64 @@ async function request(apiPath, body) {
   } finally { clearTimeout(timer); }
 }
 
+function normalizeBooks(books) {
+  const seen = new Set();
+  const results = books.filter(item => item && ID.test(String(item.bookId || '')) && plainText(item.bookName))
+    .map(item => ({ series_id: `hema:${item.bookId}`, series_title: plainText(item.bookName), cover: httpsUrl(item.coverWap),
+      episode_count: Number(item.totalChapterNum) || 0,
+      tags: Array.isArray(item.bookTypeThree) ? item.bookTypeThree.map(tag => plainText(tag?.name)).filter(Boolean).slice(0, 4) : [],
+      source: 'hema', url: `${ORIGIN}/drama/${item.bookId}` }))
+    .filter(item => { if (seen.has(item.series_id)) return false; seen.add(item.series_id); return true; });
+  return results;
+}
+
+function pageData(html) {
+  const match = typeof html === 'string' && html.match(/<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  try {
+    const data = JSON.parse(match?.[1]).props.pageProps;
+    if (!data || typeof data !== 'object') throw new Error('invalid page');
+    return data;
+  } catch (_) { throw new Error('河马目录数据异常，请稍后重试'); }
+}
+
+async function browseList(options = {}) {
+  try {
+    const { genre = '', page = 1, forceRefresh = false } = options || {};
+    const pg = Number(page);
+    const slug = String(genre || '0');
+    if (!Number.isSafeInteger(pg) || pg < 1 || !/^\d{1,30}(?:-\d{1,30}){0,15}$/.test(slug)) {
+      throw new Error('河马题材或页码无效，请重新选择');
+    }
+    let firstHtml;
+    if (forceRefresh || !genreCache || genreCache.expires <= Date.now()) {
+      firstHtml = await request('/browse');
+      const directory = pageData(firstHtml);
+      if (!Array.isArray(directory.typeThreeList)) throw new Error('河马没有返回可用题材，请重试');
+      const seen = new Set();
+      const items = directory.typeThreeList.filter(item => Array.isArray(item?.typeThreeIds)
+        && item.typeThreeIds.length > 0 && item.typeThreeIds.length <= 16
+        && item.typeThreeIds.every(id => ID.test(String(id))) && plainText(item.name))
+        .map(item => ({ slug: item.typeThreeIds.join('-'), label: plainText(item.name) }))
+        .filter(item => { if (item.slug === '0' || seen.has(item.slug)) return false; seen.add(item.slug); return true; });
+      if (!items.length) throw new Error('河马没有返回可用题材，请重试');
+      genreCache = { items, expires: Date.now() + 300000 };
+    }
+    if (slug !== '0' && !genreCache.items.some(item => item.slug === slug)) throw new Error('河马题材无效，请重新选择');
+    const apiPath = slug === '0' && pg === 1 ? '/browse' : `/browse/${slug}${pg > 1 ? `/${pg}` : ''}`;
+    const html = apiPath === '/browse' && firstHtml ? firstHtml : await request(apiPath);
+    const data = pageData(html);
+    if (!Array.isArray(data.bookList) || Number(data.page) !== pg || String(data.typeThreeId || '0') !== slug) {
+      throw new Error('河马返回的目录与请求不一致，请重试');
+    }
+    const results = normalizeBooks(data.bookList);
+    // shortcut: genre totals are unverified; follow observed next links until accurate totals are confirmed.
+    const hasMore = results.length > 0 && new RegExp(`<a\\b[^>]*\\shref=["']/browse/${slug}/${pg + 1}["']`).test(html);
+    return { success: true, results, page: pg, total: 0, totalPages: 0, hasMore,
+      nextPage: hasMore ? pg + 1 : null, genres: genreCache.items,
+      pageTitle: '河马短剧', sourceUrl: ORIGIN + apiPath };
+  } catch (error) { return { success: false, error: error.message }; }
+}
+
 async function search(keyword, page = 1) {
   try {
     const kw = String(keyword || '').trim();
@@ -48,13 +107,7 @@ async function search(keyword, page = 1) {
     const response = await request('/seo/video/6007', { sourceType: 1, keyword: kw, index: pg });
     if (response?.retCode !== 0 || !Array.isArray(response.data?.bookList)) throw new Error('河马搜索数据异常，请稍后重试');
     const data = response.data;
-    const seen = new Set();
-    const results = data.bookList.filter(item => item && ID.test(String(item.bookId || '')) && plainText(item.bookName))
-      .map(item => ({ series_id: `hema:${item.bookId}`, series_title: plainText(item.bookName), cover: httpsUrl(item.coverWap),
-        episode_count: Number(item.totalChapterNum) || 0,
-        tags: Array.isArray(item.bookTypeThree) ? item.bookTypeThree.map(tag => plainText(tag?.name)).filter(Boolean).slice(0, 4) : [],
-        source: 'hema', url: `${ORIGIN}/drama/${item.bookId}` }))
-      .filter(item => { if (seen.has(item.series_id)) return false; seen.add(item.series_id); return true; });
+    const results = normalizeBooks(data.bookList);
     const hasMore = data.isMore === 1 && results.length > 0;
     return { success: true, results, page: pg, total: Number(data.totalSize) || 0, totalPages: 0,
       hasMore, nextPage: hasMore ? pg + 1 : null, genres: [], pageTitle: '河马短剧', sourceUrl: ORIGIN };
@@ -111,4 +164,4 @@ async function fetchPlayUrlSingle(vid, sid) {
   } catch (error) { return { url: null, spadeA: null, codec: null, source: 'hema', error: error.message }; }
 }
 
-module.exports = { search, fetchEpisodeList, fetchPlayUrlSingle };
+module.exports = { browseList, search, fetchEpisodeList, fetchPlayUrlSingle };
