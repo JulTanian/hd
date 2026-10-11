@@ -7,23 +7,23 @@
 <p align="center">发现好剧，接着上次看。搜索、播放、下载、追剧与合并导出，在一个桌面应用里完成。</p>
 
 <p align="center">
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/latest"><img alt="最新公开版本" src="https://img.shields.io/github/v/release/jackotom/hongguo-drama-mac?style=flat-square"></a>
+  <a href="https://github.com/jackotom/hongguo-drama/releases/latest"><img alt="最新公开版本" src="https://img.shields.io/github/v/release/jackotom/hongguo-drama?style=flat-square"></a>
   <img alt="macOS 13 或更新版本" src="https://img.shields.io/badge/macOS-13%2B-555555?style=flat-square">
   <img alt="M 系列 Mac、Intel Mac 与 Windows x64" src="https://img.shields.io/badge/platforms-Mac_arm64_%2F_x64_%C2%B7_Windows_x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 许可证" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/jackotom/hongguo-drama-mac/releases/latest"><strong>下载最新公开版</strong></a> ·
+  <a href="https://github.com/jackotom/hongguo-drama/releases/latest"><strong>下载最新公开版</strong></a> ·
   <a href="#完整功能">完整功能</a> ·
   <a href="#安装与开始使用">安装说明</a> ·
   <a href="#常见问题">常见问题</a> ·
-  <a href="https://github.com/jackotom/hongguo-drama-mac/issues">反馈问题</a>
+  <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
 支持 **M 系列 Mac（Apple Silicon / arm64）、Intel Mac（x64）和 Windows x64**。红果、西饭、河马三个来源统一搜索，提供海报目录、选集播放与下载、本地剧库、观看记录、追剧提醒及 MP4 合并导出。
 
-本文按 **1.2 源码现有功能**整理；可下载版本及附件以[最新公开发行页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)为准。构建完成、上传草稿与正式发布是不同状态；尚未公开的版本不会出现在最新公开发行页。
+**1.2 正式版已发布**，支持 M 系列 Mac、Intel Mac 和 Windows x64。[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2)，或先看下面的完整功能视频。
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -35,11 +35,11 @@
 
 ### 1.2 功能介绍视频
 
-[![红果短剧 1.2 桌面版功能介绍封面](docs/screenshots/hongguo-1.2-promo.jpg)](https://github.com/jackotom/hongguo-drama-mac/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)
+[![红果短剧 1.2 桌面版功能介绍封面](docs/screenshots/hongguo-1.2-promo.jpg)](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)
 
-视频介绍画面缩放、保持宽度、隐藏播放器边框、窗口置顶，以及搜索、播放、下载与更新提醒。点击封面可观看或下载完整视频（约1分42秒，1.5倍速）。软件、源码与视频均已在 [1.2正式发行页](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.2) 提供。
+视频介绍画面缩放、保持宽度、隐藏播放器边框、窗口置顶，以及搜索、播放、下载与更新提醒。点击封面可观看或下载完整视频（约1分42秒，1.5倍速）。软件、源码与视频均已在 [1.2正式发行页](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) 提供。
 
-分享与推广统一使用本仓库首页：**https://github.com/jackotom/hongguo-drama-mac**。
+分享与推广统一使用本仓库首页：**https://github.com/jackotom/hongguo-drama**。
 
 ## 安装与开始使用
 
@@ -51,7 +51,7 @@
 | Intel Mac，macOS 13+ | 文件名含 `mac-x64.dmg` | 打开 DMG，拖入「应用程序」，从应用程序启动。 |
 | Windows x64 | 文件名含 `win-x64.exe` 或 `win-x64.zip` | 双击便携 EXE；ZIP 解压后运行其中同一份 EXE。 |
 
-1. 打开[最新公开发行页](https://github.com/jackotom/hongguo-drama-mac/releases/latest)，展开 **Assets**，按设备下载。
+1. 打开[最新公开发行页](https://github.com/jackotom/hongguo-drama/releases/latest)，展开 **Assets**，按设备下载。
 2. 启动后进入「设置」，选好下载目录并保存。
 3. 在「发现短剧」浏览，或在「搜索与下载」输入剧名；打开详情点「立即播放」，也可选择集数加入下载队列。
 4. 下次从「我的剧库」或「观看记录」继续；下载进度、重试和整剧导出在「下载管理」。
@@ -171,7 +171,7 @@
 
 ## 版本与验证范围
 
-**1.2 重点新增**：适应窗口 / 保持宽度两种画面模式、按剧记忆，以及可关闭的 GitHub 正式新版提醒。三平台共享功能代码。详细说明见 [1.2 变更](docs/release-1.2.md)，历史版本见 [Releases](https://github.com/jackotom/hongguo-drama-mac/releases)。
+**1.2 重点新增**：适应窗口 / 保持宽度两种画面模式、按剧记忆，以及可关闭的 GitHub 正式新版提醒。三平台共享功能代码。详细说明见 [1.2 变更](docs/release-1.2.md)，历史版本见 [Releases](https://github.com/jackotom/hongguo-drama/releases)。
 
 | 范围 | 已有证据 | 尚未覆盖 |
 |---|---|---|
@@ -210,7 +210,7 @@
 
 ### 如何反馈问题？
 
-到 [Issues](https://github.com/jackotom/hongguo-drama-mac/issues) 提供应用版本、操作系统与芯片类型、来源、复现步骤和错误提示。截图与日志请移除账号信息、Cookie、代理凭据及个人文件路径。
+到 [Issues](https://github.com/jackotom/hongguo-drama/issues) 提供应用版本、操作系统与芯片类型、来源、复现步骤和错误提示。截图与日志请移除账号信息、Cookie、代理凭据及个人文件路径。
 
 ## 从源码构建 Mac 版
 
@@ -220,8 +220,8 @@
 应用使用 **Electron + React + Node.js**。构建需要 Node.js **22.12 或更新版本**、npm、Apple Command Line Tools、`pkg-config`，以及可用的 `make`、`git`、`curl`。构建脚本不会自动安装这些系统依赖。
 
 ```sh
-git clone https://github.com/jackotom/hongguo-drama-mac.git
-cd hongguo-drama-mac
+git clone https://github.com/jackotom/hongguo-drama.git
+cd hongguo-drama
 npm ci
 npm run build:mac
 ```
@@ -241,7 +241,7 @@ npm run build:mac
 
 Mac 包内置的 FFmpeg / FFprobe 基于 **FFmpeg 9.0.2** 与 **x264 `b35605ace3ddf7c1a5d67a2eb553f034aef41d55`** 的未修改源码编译。此构建为 **GPLv3-or-later**，仅静态链接 x264，保留 VideoToolbox，未启用 `nonfree`；动态依赖仅为 macOS 系统库，不依赖使用者的 Homebrew 环境。
 
-[对应版本的 Release](https://github.com/jackotom/hongguo-drama-mac/releases/tag/v1.2) 附有**应用源码 ZIP**以及独立的 **FFmpeg/x264 完整对应源码包**，后者包含准确源码归档、构建脚本、清单与许可文本。只下载 GitHub 自动生成的项目源码归档，不能代替这一媒体工具对应源码包。
+[对应版本的 Release](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) 附有**应用源码 ZIP**以及独立的 **FFmpeg/x264 完整对应源码包**，后者包含准确源码归档、构建脚本、清单与许可文本。只下载 GitHub 自动生成的项目源码归档，不能代替这一媒体工具对应源码包。
 
 - [FFmpeg 来源、源码校验值与构建说明](build/ffmpeg/MACOS-NOTICE.txt)
 - [准确版本与构建配置](build/ffmpeg/MACOS-VERSIONS.txt)

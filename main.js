@@ -2935,7 +2935,7 @@ ipcMain.handle('check-app-update', async event => {
     return { enabled: false, release: null };
   }
   if (!updateRequest) {
-    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama-mac/releases/latest', {
+    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama/releases/latest', {
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
     }).then(response => availableRelease(response.data, APP_VERSION)).catch(() => null)
