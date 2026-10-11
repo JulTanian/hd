@@ -35,7 +35,7 @@
 
 ### 1.2 功能介绍视频
 
-https://github.com/user-attachments/assets/00c170bf-11de-4317-b70c-dca3c5f74af8
+https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 
 约 1 分 42 秒，介绍画面缩放、窗口置顶、搜索下载与更新提醒。
 
