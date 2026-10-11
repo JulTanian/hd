@@ -35,9 +35,9 @@
 
 ### 1.2 功能介绍视频
 
-[![红果短剧 1.2 桌面版功能介绍封面](docs/screenshots/hongguo-1.2-promo.jpg)](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)
+https://github.com/user-attachments/assets/00c170bf-11de-4317-b70c-dca3c5f74af8
 
-视频介绍画面缩放、保持宽度、隐藏播放器边框、窗口置顶，以及搜索、播放、下载与更新提醒。点击封面可观看或下载完整视频（约1分42秒，1.5倍速）。软件、源码与视频均已在 [1.2正式发行页](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) 提供。
+视频介绍画面缩放、保持宽度、隐藏播放器边框、窗口置顶，以及搜索、播放、下载与更新提醒。可直接在本页播放完整视频（约1分42秒，1.5倍速；720p，约5.66 MB），也可[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4)。软件、源码与视频均已在 [1.2正式发行页](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) 提供。
 
 分享与推广统一使用本仓库首页：**https://github.com/jackotom/hongguo-drama**。
 
