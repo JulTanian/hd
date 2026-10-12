@@ -19,12 +19,20 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   const context = vm.createContext({ require: n => overrides[n] || (n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root }) } : req(n)), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   context.registerStreamProtocol();
+  context.registerLocalProtocol();
   return { context, handlers, protocols, run: s => vm.runInContext(s, context) };
 }
 (async () => {
   let hits = 0, streamClosed = false;
   const server = http.createServer((r, s) => {
     hits++;
+    if (r.url === '/full-partial') { s.writeHead(206, { 'content-length': '10', 'content-range': 'bytes 0-9/10' }); s.end('0123456789'); return; }
+    if (r.url === '/short-partial') { s.writeHead(206, { 'content-length': '3', 'content-range': 'bytes 0-9/10' }); s.end('012'); return; }
+    if (r.url === '/partial') { s.writeHead(206, { 'content-length': '3', 'content-range': 'bytes 2-4/10' }); s.end('234'); return; }
+    if (r.url === '/empty') { s.writeHead(200, { 'content-length': '0' }); s.end(); return; }
+    if (r.url === '/error-page') { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<html>expired</html>'); return; }
+    if (r.url === '/missing') { s.writeHead(404); s.end('missing'); return; }
+    if (r.url === '/referer' && !r.headers.referer) { s.writeHead(403); s.end('forbidden'); return; }
     if (r.url === '/large') { s.writeHead(200, { 'content-length': String(301 * 1024 * 1024) }); s.write('hello'); return; }
     if (r.url === '/slow') { s.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '99999' }); s.write('hello'); r.on('close', () => streamClosed = true); return; }
     if (r.url === '/broken') { s.writeHead(200, { 'content-length': '99999' }); s.write('hello'); setTimeout(() => s.destroy(), 20); return; }
@@ -175,6 +183,82 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     const results = await Promise.all([h.handlers['transcode-for-playback']({}, payload), h.handlers['transcode-for-playback']({}, payload)]);
     assert.equal(spawned, 1, 'same episode cannot run two encoders against one output');
     assert.ok(results.every(r => r.success)); assert.equal(results[0].url, results[1].url);
+  });
+  await check('recovery: forced reconnect bypasses cached bytes and refreshes source', async () => {
+    let lookups = 0, forced = false;
+    const h = hload(async (_vid, _sid, options) => { lookups++; forced = options?.force === true; return { url: base + '/range' }; });
+    const cached = await h.handlers['prepare-online-play']({}, { vid: 'refresh', prefetch: true });
+    assert.equal(cached.success, true);
+    const fresh = await h.handlers['prepare-online-play']({}, { vid: 'refresh', force: true });
+    assert.equal(fresh.success, true); assert.equal(fresh.cached, false, 'failed cache was reused');
+    assert.equal(fresh.streaming, true); assert.equal(lookups, 2); assert.equal(forced, true);
+  });
+  await check('recovery: forced reconnect avoids stale pending prefetch and stale cache publication', async () => {
+    let finishOld, lookups = 0;
+    const h = hload(async () => { lookups++; return lookups === 1 ? new Promise(resolve => { finishOld = resolve; }) : { url: base + '/range' }; });
+    const old = h.handlers['prepare-online-play']({}, { vid: 'pending-refresh', prefetch: true });
+    const freshWork = h.handlers['prepare-online-play']({}, { vid: 'pending-refresh', force: true });
+    const fresh = await Promise.race([freshWork, sleep(100).then(() => ({ timeout: true }))]);
+    finishOld({ url: base + '/range' }); await old; await freshWork;
+    assert.equal(fresh.success, true, 'forced request waited for stale preparation');
+    assert.equal(fresh.streaming, true); assert.equal(h.run('onlineCache.size'), 0, 'old prefetch republished stale bytes');
+  });
+  await check('recovery: releasing superseded prefetch cancels only its own transfer', async () => {
+    const h = hload(async () => ({ url: base + '/range' }));
+    let finishBody, oldSignal;
+    h.context.fetchDecryptedEpisode = async (_vid, _progress, _sid, _info, signal) => {
+      oldSignal = signal; return new Promise(resolve => { finishBody = resolve; });
+    };
+    const old = h.handlers['prepare-online-play']({}, { vid: 'superseded', requestId: 'old-prefetch', prefetch: true });
+    await sleep(0);
+    const fresh = await h.handlers['prepare-online-play']({}, { vid: 'superseded', requestId: 'fresh-stream', force: true });
+    await h.handlers['release-online-play']({}, { requestId: 'old-prefetch' });
+    const aborted = oldSignal.aborted;
+    finishBody(Buffer.from('stale')); await old;
+    assert.equal(aborted, true, 'superseded preparation lost its cancellation owner');
+    assert.equal((await h.protocols['hongguo-stream'](new Request(fresh.url))).status, 200);
+  });
+  await check('recovery: forced compatibility input asks native provider for fresh URL', async () => {
+    let forced = false;
+    const h = hload(async (_vid, _sid, options) => { forced = options?.force === true; return { url: base + '/range' }; });
+    assert.equal((await h.context.fetchDecryptedEpisode('compat-refresh', null, 'S', undefined, undefined, Infinity, true)).length, 10);
+    assert.equal(forced, true);
+  });
+  for (const endpoint of ['partial', 'short-partial', 'empty', 'error-page', 'missing']) {
+    await check('recovery: ' + endpoint + ' response never becomes playback cache', async () => {
+      const h = hload(async () => ({ url: base + '/' + endpoint }));
+      const result = await h.handlers['prepare-online-play']({}, { vid: endpoint, prefetch: true });
+      assert.equal(result.success, false, endpoint + ' response was accepted as full video');
+      assert.equal(h.run('onlineCache.size'), 0);
+    });
+  }
+  await check('recovery: empty download never publishes a completed file', async () => {
+    const h = hload(async () => ({ url: base + '/empty' }));
+    const task = { id: 'empty', type: 'hongguo', filename: 'empty.mp4', customDir: root, hongguoInfo: { vid: 'empty' } };
+    await h.context.executeHongguoDownload(task);
+    assert.equal(task.status, 'failed'); assert.equal(fs.existsSync(path.join(root, 'empty.mp4')), false);
+    assert.equal(fs.existsSync(path.join(root, 'empty.mp4.enc.tmp')), false);
+  });
+  await check('recovery: complete 206 response remains usable for full prefetch', async () => {
+    const h = hload(async () => ({ url: base + '/full-partial' }));
+    const result = await h.handlers['prepare-online-play']({}, { vid: 'full-partial', prefetch: true });
+    assert.equal(result.success, true); assert.equal(result.size, 10);
+  });
+  await check('recovery: 403 retries once with provider Referer and preserves valid body', async () => {
+    const h = hload(async () => ({ url: base + '/referer' })), before = hits;
+    const result = await h.handlers['prepare-online-play']({}, { vid: 'referer', prefetch: true });
+    assert.equal(result.success, true); assert.equal(result.size, 10); assert.equal(hits, before + 2);
+  });
+  await check('recovery: local files serve suffix and reject malformed or unsatisfiable Range', async () => {
+    const h = hload(async () => ({})), file = path.join(root, 'local-range.mp4');
+    fs.writeFileSync(file, '0123456789'); const url = h.context.localPlayUrl(file);
+    const suffix = await h.protocols['hongguo-local'](new Request(url, { headers: { range: 'bytes=-3' } }));
+    assert.equal(suffix.status, 206); assert.equal(await suffix.text(), '789');
+    assert.equal(suffix.headers.get('content-range'), 'bytes 7-9/10');
+    for (const range of ['bytes=12-20', 'bytes=5-2', 'bytes=0-2,4-6', 'junk']) {
+      const response = await h.protocols['hongguo-local'](new Request(url, { headers: { range } }));
+      assert.equal(response.status, 416, range); assert.equal(response.headers.get('content-range'), 'bytes */10');
+    }
   });
   for (const h of harnesses) h.context.clearOnlineCache();
   server.closeAllConnections(); await new Promise(r => server.close(r));

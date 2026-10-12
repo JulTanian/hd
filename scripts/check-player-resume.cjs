@@ -29,6 +29,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
       if (!media.paused) video?.props.onPlaying?.({ currentTarget: media });
     }, pause: () => { mediaCalls.pause++; media.paused = true; },
     focus: () => { document.activeElement = media; },
+    removeAttribute: name => { if (name === 'src') media.src = ''; },
     load: () => { media.currentTime = 0; media.readyState = 0; media.currentSrc = ''; media.paused = true; },
     addEventListener: (name, fn) => mediaEvents.set(name, fn), removeEventListener: name => mediaEvents.delete(name) };
   const changed = (old, deps) => !old || deps.some((d, i) => !Object.is(d, old[i]));
@@ -75,7 +76,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const render = () => {
     cursor = 0; tree = context.module.exports.default(props);
     const video = find(n => n.type === 'video');
-    if (video) { if (video.props.src !== oldSrc || video.props.key !== oldKey) { media.load(); oldSrc = video.props.src; oldKey = video.props.key; } media.src = video.props.src; video.props.ref.current = media; }
+    if (video) { if (video.props.src !== oldSrc || video.props.key !== oldKey) { media.src = video.props.src; media.load(); oldSrc = video.props.src; oldKey = video.props.key; } video.props.ref.current = media; }
     else for (const slot of slots) if (slot?.current === media) slot.current = null;
     effects.splice(0).forEach(fn => fn()); return tree;
   };
@@ -97,6 +98,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   render();
   return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
     releases, settingsSaved,
+    flushBatched: async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); render(); },
     transcodeProgress: payload => transcodeProgress?.(payload),
     button: label => find(n => n.type === 'button' && text(n).includes(label)),
     episode: n => find(x => x.props['aria-label'] === `第 ${n} 集`).props.onClick(),
@@ -127,7 +129,11 @@ if (require.main === module) (async () => {
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush(); ui.metadata(); ui.media.currentTime = 27;
     ui.error(3); ui.error(3); await ui.flush(); assert.equal(ui.transcodes.length, 1);
     assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-compat.mp4'); ui.metadata();
-    assert.equal(ui.media.currentTime, 27); ui.error(4); await ui.flush(); assert.equal(ui.transcodes.length, 1, 'compat errors must not loop');
+    assert.equal(ui.media.currentTime, 27); ui.error(4); await ui.flush();
+    assert.equal(ui.transcodes.length, 2, 'failed compatibility media gets one forced rebuild');
+    assert.equal(ui.transcodes[1].force, true);
+    ui.metadata(); assert.equal(ui.media.currentTime, 27, 'forced rebuild retains position');
+    ui.error(4); await ui.flush(); assert.equal(ui.transcodes.length, 2, 'forced compatibility errors must not loop');
     assert.ok(ui.button('重试本集'), 'compat failure must offer explicit retry');
     ui.find(n => n.props.className?.includes('series-picker-btn')).props.onClick(); await ui.flush();
     await ui.button('清空转码缓存').props.onClick(); await ui.flush();
@@ -137,10 +143,48 @@ if (require.main === module) (async () => {
     await ui.button('重试本集').props.onClick(); await ui.flush(); ui.metadata();
     assert.equal(ui.media.currentTime, 27, 'retry after clearing current cache retains position'); ui.unmount();
   });
+  await test('same-url fast compatibility rebuild restores the DOM source after batched state updates', async () => {
+    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 19; ui.error(3); await ui.flush(); ui.metadata();
+    const source = ui.media.src;
+    ui.error(3); await ui.flushBatched();
+    assert.equal(ui.transcodes.length, 2);
+    assert.equal(ui.media.src, source, 'same virtual src must still restore the imperatively removed DOM src');
+    ui.metadata(); assert.equal(ui.media.currentTime, 19); ui.unmount();
+  });
+  await test('compatibility rebuild releases the old source and ignores obsolete results', async () => {
+    let resolve, calls = 0;
+    const ui = mount({ local: true, transcode: async () => ++calls === 1
+      ? { success: true, cached: true, url: 'file:///cached-compat.mp4' }
+      : new Promise(done => { resolve = done; }) });
+    await ui.flush(); ui.metadata(); ui.media.currentTime = 31;
+    ui.error(3); await ui.flush(); ui.metadata();
+    ui.error(3); await ui.flush();
+    assert.equal(ui.transcodes.length, 2, 'cached decode failure must force a rebuild');
+    assert.equal(ui.transcodes[1].force, true);
+    assert.equal(ui.find(n => n.type === 'video').props.src, undefined, 'release old file while replacing Windows cache');
+    assert.equal(ui.media.currentSrc, '');
+    ui.episode(2); await ui.flush();
+    assert.equal(ui.cancelled.at(-1).requestId, ui.transcodes[1].requestId);
+    resolve({ success: true, url: 'file:///cached-compat.mp4' }); await ui.flush();
+    assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-2.mp4');
+    ui.unmount();
+  });
+  await test('manual compatibility retry forces rebuilding and automatic compatibility can stay off', async () => {
+    const ui = mount({ local: true, settings: { compat_mode: false }, transcode: async () => ({ success: false, error: 'software conversion failed' }) });
+    await ui.flush(); ui.metadata(); ui.error(3); await ui.flush();
+    assert.equal(ui.transcodes.length, 0);
+    await ui.button('转码后播放').props.onClick(); await ui.flush();
+    assert.equal(ui.transcodes[0].force, true, 'explicit retry must not reuse a failed cache');
+    assert.ok(ui.find(n => n.props.role === 'alert' && n.children.includes('software conversion failed')), 'retain diagnostic message after toast expires');
+    ui.error(3); await ui.flush(); assert.equal(ui.transcodes.length, 1);
+    ui.unmount();
+  });
   await test('failed automatic transcode does not loop on repeated decode events', async () => {
     const ui = mount({ local: true, transcode: async () => ({ success: false, error: 'mock failure' }) }); await ui.flush(); ui.metadata();
     ui.error(4); await ui.flush(); ui.error(4); await ui.flush();
-    assert.equal(ui.transcodes.length, 1); assert.ok(ui.button('转码后播放')); ui.unmount();
+    ui.error(4); await ui.flush();
+    assert.equal(ui.transcodes.length, 2, 'one original and one refreshed-source conversion, then stop'); assert.ok(ui.button('转码后播放')); ui.unmount();
     let resolve;
     const pending = mount({ local: true, transcode: () => new Promise(r => { resolve = r; }) });
     await pending.flush(); pending.metadata(); pending.error(3); await pending.flush();
@@ -149,9 +193,53 @@ if (require.main === module) (async () => {
     resolve({ success: true, url: 'file:///late-compat.mp4' }); await pending.flush();
     assert.equal(pending.find(n => n.type === 'video').props.src, 'file:///mock-2.mp4'); pending.unmount();
   });
-  await test('local loading failure exposes retry and preserves the second', async () => {
+  await test('reconnecting online does not transcode the failed local download again', async () => {
+    const ui = mount({ local: true, settings: { cache_next_episode: false, compat_mode: false }, transcode: async () => ({ success: false, error: 'bad local media' }) });
+    await ui.flush(); ui.metadata(); ui.error(3); await ui.flush();
+    await ui.button('转码后播放').props.onClick(); await ui.flush();
+    assert.equal(ui.transcodes[0].filePath, '/mock-1.mp4');
+    await ui.button('重新连接片源').props.onClick(); await ui.flush(); ui.metadata();
+    ui.error(3); await ui.flush(); await ui.button('转码后播放').props.onClick(); await ui.flush();
+    assert.equal(ui.transcodes[1].filePath, null, 'online recovery must use its online source');
+    ui.unmount();
+  });
+  await test('network failure refreshes the same episode once and retains position', async () => {
+    const ui = mount({ settings: { cache_next_episode: false } }); await ui.flush(); await ui.button('在线播放').props.onClick(); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 42; ui.error(2); await ui.flush();
+    assert.equal(ui.prepares.length, 2, 'network failure should reconnect once');
+    assert.equal(ui.prepares[1].force, true);
+    ui.metadata(); assert.equal(ui.media.currentTime, 42);
+    ui.error(2); await ui.flush();
+    assert.equal(ui.prepares.length, 2, 'persistent network failure must stop');
+    assert.ok(ui.button('重试本集')); ui.unmount();
+  });
+  await test('failed local conversion falls back online once without deleting the download', async () => {
+    const ui = mount({ local: true, settings: { cache_next_episode: false }, transcode: async () => ({ success: false, error: 'bad local media' }) });
+    await ui.flush(); ui.metadata(); ui.media.currentTime = 18;
+    ui.error(3); await ui.flush();
+    assert.equal(ui.prepares.length, 1, 'failed local conversion should reconnect online');
+    assert.equal(ui.prepares[0].force, true); ui.metadata(); assert.equal(ui.media.currentTime, 18);
+    ui.error(3); await ui.flush();
+    assert.equal(ui.transcodes.length, 2); assert.equal(ui.transcodes[1].filePath, null);
+    assert.equal(ui.prepares.length, 1, 'a bad online source must not loop back through reconnection');
+    ui.error(3); await ui.flush(); assert.equal(ui.transcodes.length, 2);
+    ui.unmount();
+  });
+  await test('retry keeps online recovery instead of returning to the broken local file', async () => {
+    const ui = mount({ local: true, settings: { cache_next_episode: false } });
+    await ui.flush(); ui.metadata(); ui.media.currentTime = 23;
+    ui.error(2); await ui.flush(); ui.metadata();
+    ui.error(2); await ui.flush();
+    assert.ok(ui.button('重试本集'));
+    await ui.button('重试本集').props.onClick(); await ui.flush();
+    assert.equal(ui.prepares.length, 2, 'manual retry must retain the online source choice');
+    assert.equal(ui.prepares[1].force, true);
+    assert.notEqual(ui.find(n => n.type === 'video').props.src, 'file:///mock-1.mp4');
+    ui.metadata(); assert.equal(ui.media.currentTime, 23); ui.unmount();
+  });
+  await test('aborted local loading exposes retry and preserves the second', async () => {
     const ui = mount({ local: true }); await ui.flush(); ui.metadata(); ui.media.currentTime = 42;
-    ui.error(2); await ui.flush(); assert.ok(ui.button('重试本集'));
+    ui.error(1); await ui.flush(); assert.ok(ui.button('重试本集'));
     await ui.button('重试本集').props.onClick(); await ui.flush(); ui.metadata();
     assert.equal(ui.media.currentTime, 42);
     ui.find(n => n.props.className?.includes('series-picker-btn')).props.onClick(); await ui.flush();

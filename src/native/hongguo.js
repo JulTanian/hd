@@ -2,6 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { URL } = require('node:url');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
@@ -136,16 +137,21 @@ const responseCache = new Map();
 const pendingRequests = new Map();
 
 /** 仅保留短期成功结果；重复点击共享请求，失败后立即允许重试。 */
-async function cachedRequest(key, ttl, load) {
+async function cachedRequest(key, ttl, load, { force = false } = {}) {
   const cached = responseCache.get(key);
-  if (cached && cached.expires > Date.now()) return cached.value;
+  if (!force && cached && cached.expires > Date.now()) return cached.value;
   responseCache.delete(key);
-  if (pendingRequests.has(key)) return pendingRequests.get(key);
+  if (!force && pendingRequests.has(key)) return pendingRequests.get(key);
   const request = Promise.resolve().then(load).then(value => {
-    responseCache.set(key, { value, expires: Date.now() + ttl });
-    if (responseCache.size > 128) responseCache.delete(responseCache.keys().next().value);
+    // A forced lookup owns the cache even if an older request finishes later.
+    if (pendingRequests.get(key) === request) {
+      responseCache.set(key, { value, expires: Date.now() + ttl });
+      if (responseCache.size > 128) responseCache.delete(responseCache.keys().next().value);
+    }
     return value;
-  }).finally(() => pendingRequests.delete(key));
+  }).finally(() => {
+    if (pendingRequests.get(key) === request) pendingRequests.delete(key);
+  });
   pendingRequests.set(key, request);
   return request;
 }
@@ -406,7 +412,7 @@ function streamScore(v) {
 
 /**
  * 解析单个 video_model JSON
- * 选流优先级：清晰度标签 > 像素 > 编码格式 > 码率（取最高分辨率）
+ * 选流优先级：H.264 兼容性 > 清晰度标签 > 像素 > 码率
  */
 function parseModelVideo(vm) {
   if (typeof vm !== 'string') return [null, null, null];
@@ -418,27 +424,37 @@ function parseModelVideo(vm) {
   }
   const vl = vmj.video_list || [];
   const rank = (codec) => {
-    if (['h265', 'h264', 'h265_hvc1', 'hevc', 'hvc1', 'avc1'].includes(codec)) return 0;
-    if (codec === 'bytevc1') return 1;
+    if (['h264', 'avc', 'avc1'].includes(codec)) return 0;
+    if (['h265', 'h265_hvc1', 'hevc', 'hvc1', 'hev1', 'bytevc1'].includes(codec)) return 1;
     return 2;
   };
-  // 比较两条流：返回 >0 表示 a 更清晰
+  // 比较两条流：返回 >0 表示 a 更适合播放
   const cmp = (a, b) => {
+    if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank; // rank 越小越好
     if (a.defNum !== b.defNum) return a.defNum - b.defNum;
     if (a.pixels !== b.pixels) return a.pixels - b.pixels;
-    if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank; // rank 越小越好
     return a.bitrate - b.bitrate;
   };
   let best = null;
   let bestScore = null;
-  for (const v of vl) {
-    if (!v.main_url) continue;
-    const codec = v.video_meta?.codec_type || '';
+  for (const v of Object.values(vl)) {
+    let url;
+    for (const raw of [v.main_url, v.backup_url]) {
+      try {
+        const candidate = new URL(normalizeVideoUrl(raw));
+        if (['https:', 'http:'].includes(candidate.protocol) && !candidate.username && !candidate.password) {
+          url = candidate.href;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!url) continue;
+    const codec = String(v.video_meta?.codec_type || '').toLowerCase();
     const ei = v.encrypt_info || {};
     const s = { ...streamScore(v), codecRank: rank(codec) };
     if (!bestScore || cmp(s, bestScore) > 0) {
       bestScore = s;
-      best = [v.main_url, ei.spade_a || null, codec];
+      best = [url, ei.spade_a || null, codec];
     }
   }
   return best || [null, null, null];
@@ -447,11 +463,11 @@ function parseModelVideo(vm) {
 /**
  * 获取单集播放直链与 spade_a 加密 key
  */
-async function fetchPlayUrlSingle(vid, sid) {
+async function fetchPlayUrlSingle(vid, sid, options = {}) {
   if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
   if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
   try {
-    return await cachedRequest(`play:${sid || ''}:${vid}`, 30000, () => fetchPlayUrlFresh(vid, sid));
+    return await cachedRequest(`play:${sid || ''}:${vid}`, 30000, () => fetchPlayUrlFresh(vid, sid), options);
   } catch (error) {
     return { url: null, spadeA: null, codec: null, error: error.message };
   }

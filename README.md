@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-**当前源码版本为 1.4（配置版本 1.4.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
+**当前源码版本为 1.5（配置版本 1.5.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
 
-[下载 1.4 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.4) · [观看功能介绍](#13-完整功能介绍视频)
+[下载 1.5 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.5) · [观看功能介绍](#13-完整功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/b95f4f60-b57c-495f-a30e-62ac2b0bda11
 视频使用 1.3 正式前端和隔离的演示资料；播放器画面为短剧封面演示，集数、榜单、评分、评论与日期不代表真实平台数据。
 
 [下载三分钟介绍视频（1080p，约6 MB）](https://github.com/jackotom/hongguo-drama/releases/download/v1.3/Hongguo-1.3-Complete-Intro-3min.mp4) ·
-[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.4)
+[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.5)
 
 分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
@@ -66,6 +66,16 @@ Mac 正式发行流程包含 Developer ID 签名、Apple 公证和票据装订�
 发行附件提供应用对应源码、各平台 FFmpeg/x264 对应源码和 `SHA256SUMS.txt`。不要把 GitHub 自动生成的 Source code ZIP 当成可直接运行的软件。
 
 仓库已从 `hongguo-drama-mac` 更名为 `hongguo-drama`，本页 1.2 安装包已修正更新地址。**已安装更名前 1.2 的用户，请手动下载替换一次**；应用标识和用户资料位置保持不变。修订精确源码见发行附件 `hongguo-drama-1.2-source.zip`，原 `v1.2` 标签保留首发历史。
+
+## 1.5 修复
+
+- 优先选择较兼容的 H.264 片源，同编码内再优先清晰度；可能低于 HEVC 片源的最高分辨率。主地址格式无效时，检查同一集的合法备用地址。
+- 重新连接会刷新播放地址和媒体缓存；旧请求不能覆盖新缓存。拒绝不完整视频、空响应和明确的网页错误内容，修正本地视频拖动读取范围。
+- 网络失败或本地转码失败会有限尝试同集在线播放，保留进度与来源选择；再次失败停止，不无限重试。修复同地址快速重建时媒体地址未恢复的问题。
+- 兼容转码在实际硬件编码失败后自动尝试一次软件编码；软件也失败时停止并保留具体报错。
+- 兼容视频仍无法解码时，自动绕过旧缓存并用软件重新转码一次；手动重新转码同样重建，保留播放进度。重新连接在线播放后，不再拿失败的本地下载文件转码。
+- 全屏控制条修复针对“先按上一集，再自动下一集”的状态延续，保留真实鼠标和键盘操作。
+- 本地回归与故障注入不等于 Windows 11 真机验收；签名、公证与发行检查结果见 1.5 发行页。
 
 ## 1.4 修复
 

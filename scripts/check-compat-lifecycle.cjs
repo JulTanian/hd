@@ -11,7 +11,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-compat-lifecycle-'))
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 let failures = 0, serial = 0;
-function load({ permission, manual = false, probe } = {}) {
+function load({ permission, manual = false, probe, encoder = 'libx264', exitCodes = [] } = {}) {
   const dir = path.join(root, String(++serial)); fs.mkdirSync(dir);
   const handlers = {}, events = [], children = [], app = new EventEmitter();
   Object.assign(app, { getVersion: () => 'test', getPath: () => dir, commandLine: { appendSwitch() {} }, whenReady: () => ({ then() {} }) });
@@ -19,10 +19,11 @@ function load({ permission, manual = false, probe } = {}) {
   const metrics = { media: 0, encoder: 0, permissions: 0 };
   const childProcess = { spawn(_file, args) {
     const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
-    child.output = args.at(-1); child.killed = false; child.closed = false;
+    child.args = args; child.input = fs.readFileSync(args[args.indexOf('-i') + 1]); child.output = args.at(-1); child.killed = false; child.closed = false;
     child.finish = (code = 0) => { if (child.closed) return; child.closed = true; if (code === 0) fs.writeFileSync(child.output, Buffer.alloc(120000)); child.emit('close', code); };
     child.kill = () => { child.killed = true; if (!manual) setImmediate(() => child.finish(143)); return true; };
-    children.push(child); if (!manual) setImmediate(() => child.finish(child.killed ? 143 : 0)); return child;
+    const exitCode = exitCodes[children.length] ?? 0;
+    children.push(child); if (!manual) setImmediate(() => child.finish(child.killed ? 143 : exitCode)); return child;
   } };
   const native = { fetchEpisodeList: async () => { metrics.permissions++; return permission ? permission() : { episodes: [{ vid: 'xifan:v', vid_index: 1, locked: false }] }; } };
   const context = vm.createContext({ require: name => name === 'electron' ? electron : name === 'child_process' ? childProcess : name === './src/native/hongguo' ? native : name === './src/store' ? {} : req(name), __dirname: path.dirname(source), process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout, console: { log() {}, error() {}, warn() {} } });
@@ -30,7 +31,7 @@ function load({ permission, manual = false, probe } = {}) {
   context.resolveFfmpeg = () => '/fixture/ffmpeg';
   context.fetchDecryptedEpisode = async () => { metrics.media++; return Buffer.alloc(120000); };
   context.probeDuration = probe || (async () => 1);
-  context.pickH264Encoder = async () => { metrics.encoder++; return 'libx264'; };
+  context.pickH264Encoder = async () => { metrics.encoder++; return encoder; };
   context.sendToRenderer = (name, data) => events.push({ name, ...data });
   return { context, handlers, dir, children, metrics, events, run: code => vm.runInContext(code, context) };
 }
@@ -108,6 +109,54 @@ async function check(name, fn) { try { await fn(); console.log('PASS ' + name); 
     gate.resolve(unlocked); await clearing;
     assert.equal((await old).success, false); assert.equal((await next).success, true);
     assert.equal(h.metrics.media, 1); assert.equal(fs.readdirSync(h.context.getCompatDir()).length, 1);
+  });
+  await check('actual hardware failure retries once with software and reports final encoder', async () => {
+    const h = load({ encoder: 'h264_videotoolbox', exitCodes: [1, 0] });
+    const result = await h.handlers['transcode-for-playback']({}, { ...payload('hardware-fallback'), force: false });
+    assert.equal(result.success, true, 'hardware failure should retry in software');
+    assert.equal(result.encoder, 'libx264'); assert.equal(h.children.length, 2);
+    assert.deepEqual(h.children.map(child => child.args[child.args.indexOf('-c:v') + 1]), ['h264_videotoolbox', 'libx264']);
+    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), [path.basename(h.context.compatPathFor('xifan:S', 1))]);
+  });
+  await check('software fallback failure stops after two attempts and cleans temporary files', async () => {
+    const h = load({ encoder: 'h264_nvenc', exitCodes: [1, 2] });
+    const result = await h.handlers['transcode-for-playback']({}, { ...payload('software-failure'), force: false });
+    assert.equal(result.success, false); assert.equal(h.children.length, 2);
+    assert.match(result.error, /软件转码失败.*2/);
+    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), []); assert.equal(h.run('compatPreparing.size'), 0);
+  });
+  await check('cancelling hardware transcode never starts software fallback', async () => {
+    const h = load({ encoder: 'h264_nvenc', manual: true });
+    const started = h.handlers['transcode-for-playback']({}, { ...payload('hardware-cancel'), force: false }); await tick(); await tick();
+    const cancelled = h.handlers['cancel-transcode-for-playback']({}, payload('hardware-cancel'));
+    h.children[0].finish(143); const result = await started; await cancelled;
+    assert.equal(result.cancelled, true); assert.equal(h.children.length, 1);
+    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), []);
+  });
+  await check('force rebuild bypasses both caches and encoder probes', async () => {
+    const h = load({ encoder: 'h264_nvenc' });
+    fs.writeFileSync(h.context.compatPathFor('xifan:S', 1), Buffer.alloc(120000, 1));
+    h.run("onlineCache.set('xifan:v', { buffer: Buffer.alloc(120000, 2) })");
+    const result = await h.handlers['transcode-for-playback']({}, payload('force-rebuild'));
+    assert.equal(result.success, true); assert.equal(result.cached, undefined);
+    assert.equal(h.metrics.media, 1, 'force must fetch fresh source bytes'); assert.equal(h.metrics.encoder, 0, 'force must not probe hardware');
+    assert.equal(result.encoder, 'libx264'); assert.equal(h.children.length, 1);
+    assert.equal(h.children[0].input[0], 0); assert.equal(fs.readFileSync(h.context.compatPathFor('xifan:S', 1))[0], 0);
+  });
+  await check('force preserves downloaded original and uses it before online input', async () => {
+    const h = load({ encoder: 'h264_nvenc' }), filePath = path.join(h.dir, 'downloaded.mp4');
+    fs.writeFileSync(filePath, Buffer.alloc(120000, 7));
+    const result = await h.handlers['transcode-for-playback']({}, { ...payload('force-local'), filePath });
+    assert.equal(result.success, true); assert.equal(result.encoder, 'libx264');
+    assert.equal(h.metrics.media, 0); assert.equal(h.children[0].input[0], 7);
+    assert.equal(fs.readFileSync(filePath)[0], 7); assert.equal(fs.statSync(filePath).size, 120000);
+  });
+  await check('forced software failure stops after one attempt', async () => {
+    const h = load({ encoder: 'h264_nvenc', exitCodes: [9] });
+    const result = await h.handlers['transcode-for-playback']({}, payload('force-failure'));
+    assert.equal(result.success, false); assert.match(result.error, /软件转码失败.*9/);
+    assert.equal(h.children.length, 1); assert.equal(h.metrics.encoder, 0);
+    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), []);
   });
   assert.equal(failures, 0, `${failures} compatibility lifecycle regressions`);
 })().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(() => fs.rmSync(root, { recursive: true, force: true }));

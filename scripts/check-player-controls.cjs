@@ -13,8 +13,16 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
 
 (async () => {
   const slots = [], effects = [], cleanups = [], listeners = new Map(), documentListeners = new Map(), stageListeners = new Map(), windowListeners = new Map(), timers = new Map();
-  let nextTimer = 0, keyboardFocus = false;
-  const advance = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); };
+  let nextTimer = 0, keyboardFocus = false, now = 0;
+  const advance = (milliseconds = 2000) => {
+    const until = now + milliseconds;
+    for (;;) {
+      const next = [...timers].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next) break;
+      now = next[1].at; timers.delete(next[0]); next[1].fn();
+    }
+    now = until;
+  };
   let needsRender = false;
   let cursor = 0, tree, plays = 0, pauses = 0, fullscreenCalls = 0, selectedRate;
   const react = {
@@ -36,11 +44,12 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     else if (document.fullscreenElement === stage) await document.exitFullscreen();
     else await stage.requestFullscreen();
   };
-  const context = { module: { exports: {} }, document, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
+  const context = { module: { exports: {} }, document, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, at: now + delay }); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
   context.exports = context.module.exports; vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const visit = node => { if (!node || typeof node !== 'object') return; out.push(node); node.children?.forEach(visit); }; visit(tree); return out; };
   const find = label => nodes().find(node => node.props['aria-label'] === label);
-  const render = () => { do { needsRender = false; cursor = 0; tree = context.module.exports.default(props); for (const node of nodes()) if (node.props.ref) node.props.ref.current = { contains: target => target === node, focus() {}, querySelector: () => keyboardFocus ? {} : null }; effects.splice(0).forEach(fn => fn()); } while (needsRender); };
+  const contains = (node, target) => node === target || !!node?.children?.some(child => contains(child, target));
+  const render = () => { do { needsRender = false; cursor = 0; tree = context.module.exports.default(props); for (const node of nodes()) if (node.props.ref) node.props.ref.current = { contains: target => contains(node, target), focus() {}, querySelector: () => keyboardFocus ? {} : null }; effects.splice(0).forEach(fn => fn()); } while (needsRender); };
   render(); render();
   props.shortcuts = { ...shortcutModule.exports.DEFAULT_SHORTCUTS, play: 'shift+j', fullscreen: 'g' }; render();
   assert.equal(find('播放').props.title, '播放/暂停（Shift + J）');
@@ -65,6 +74,8 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   await find('全屏').props.onClick(); render(); assert.equal(fullscreenCalls, 1); assert.ok(find('退出全屏'));
   await find('播放').props.onClick(); render(); advance(); render();
   const hidden = () => tree.props.className.includes('controls-hidden');
+  let pointerX = 100;
+  const movePointer = (delta = 1) => { pointerX += delta; stageListeners.get('pointermove')({ screenX: pointerX, screenY: 100, movementX: delta, movementY: 0 }); render(); };
   assert.ok(hidden(), 'playing in landscape fullscreen must hide idle controls');
   const keyTarget = { closest: () => null };
   const keyboard = (type, key, extra = {}) => {
@@ -102,7 +113,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     }
   }
   props.shortcuts = shortcutModule.exports.DEFAULT_SHORTCUTS; render();
-  stageListeners.get('pointermove')(); render();
+  movePointer();
   keyboard('keydown', 'ArrowDown'); keyboard('keyup', 'ArrowDown');
   assert.ok(!hidden(), 'visible controls remain visible after an episode shortcut');
   advance(); render();
@@ -121,6 +132,48 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   props.available = true; await media.play(); render(); advance(); render();
   keyboard('keyup', 'ArrowDown');
 
+  // Replay previous -> playback -> natural end -> automatic next, including native event churn.
+  props.autoContinue = true; render(); movePointer(); advance(); render();
+  keyboard('keydown', 'ArrowUp');
+  props.continuing = true; props.available = false; media.pause(); render();
+  keyboard('keyup', 'ArrowUp');
+  movePointer(0);
+  assert.ok(hidden(), 'stationary pointer events during previous-episode handoff must not reveal controls');
+  stageListeners.get('focusin')({ target: media }); stageListeners.get('focusout')({ target: media }); render();
+  assert.ok(hidden(), 'video focus churn during previous-episode handoff must preserve hidden controls');
+  props.source = 'previous-after-up'; props.available = true; media.ended = false;
+  listeners.get('emptied')?.(); listeners.get('loadedmetadata')?.(); render();
+  await media.play(); props.continuing = false; render();
+  keyboard('keyup', 'ArrowUp'); stageListeners.get('focusin')({ target: media }); render();
+  assert.ok(hidden(), 'previous episode starts with controls hidden');
+  media.pause(); render(); advance(60); render();
+  assert.ok(hidden(), 'pause arriving just before ended must not flash controls');
+  media.ended = true; listeners.get('ended')?.(); render();
+  props.continuing = true; props.available = false; render();
+  movePointer(0); stageListeners.get('focusin')({ target: media }); render();
+  props.source = 'next-after-previous'; props.available = true; media.ended = false;
+  listeners.get('emptied')?.(); listeners.get('loadedmetadata')?.(); render();
+  await media.play(); props.continuing = false; render(); advance(200); render();
+  assert.ok(hidden(), 'automatic next after previous preserves hidden controls and cancels delayed pause reveal');
+  movePointer(); assert.ok(!hidden(), 'real pointer movement still reveals controls'); advance(); render();
+  props.continuing = true; render(); movePointer();
+  assert.ok(!hidden(), 'real pointer movement during a handoff still reveals controls'); advance(); render();
+  stageListeners.get('pointerdown')({ target: media }); render();
+  assert.ok(!hidden(), 'clicking the video during a handoff reveals controls'); advance(); render();
+  keyboardFocus = true; keyboard('keydown', 'Tab');
+  stageListeners.get('focusin')({ target: find('暂停') }); render(); advance(); render();
+  assert.ok(!hidden(), 'Tab focus on a control stays visible throughout a handoff');
+  keyboardFocus = false; props.continuing = false; render(); advance(); render();
+  stageListeners.get('focusin')({ target: find('暂停') }); render();
+  assert.ok(!hidden(), 'programmatic focus on a control remains accessible'); advance(); render();
+  keyboard('keydown', ' '); media.pause(); render();
+  assert.ok(!hidden(), 'intentional keyboard pause is immediately visible even with auto-next');
+  await media.play(); render(); advance(); render(); media.pause(); render();
+  stageListeners.get('focusin')({ target: media }); stageListeners.get('focusout')({ target: media }); render();
+  advance(200); render();
+  assert.ok(!hidden(), 'persistent external pause reveals controls after the short event-settling delay');
+  await media.play(); render(); advance(); render();
+
   props.autoContinue = true; render();
   media.ended = true; media.pause(); render();
   assert.ok(hidden(), 'end-of-episode pause before ended must not reveal controls when auto-next is available');
@@ -133,7 +186,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   assert.ok(hidden(), 'metadata while paused must not reveal controls during auto-next');
   await media.play(); props.continuing = false; render();
   assert.ok(hidden(), 'starting the next episode must retain hidden controls');
-  stageListeners.get('pointermove')(); render(); assert.ok(!hidden(), 'moving the pointer reveals controls');
+  movePointer(); assert.ok(!hidden(), 'moving the pointer reveals controls');
   advance(); render(); assert.ok(hidden());
   media.ended = true; media.pause(); render();
   assert.ok(!hidden(), 'last episode or disabled auto-next restores controls at the end');
@@ -144,14 +197,14 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   find('更多播放选项').props.onClick(); render();
   stageListeners.get('pointerdown')({ target: { closest: () => ({}) } }); advance(); render(); assert.ok(!hidden(), 'dragging prevents hiding');
   windowListeners.get('pointerup')(); advance(); render(); assert.ok(hidden(), 'releasing the slider restarts hiding');
-  keyboardFocus = true; stageListeners.get('focusin')(); advance(); render(); assert.ok(!hidden(), 'keyboard focus remains visible');
+  keyboardFocus = true; stageListeners.get('focusin')({ target: find('暂停') }); advance(); render(); assert.ok(!hidden(), 'keyboard focus remains visible');
   keyboardFocus = false; stageListeners.get('focusout')(); advance(); render(); assert.ok(hidden());
   await find('退出全屏').props.onClick(); render(); render(); assert.equal(document.fullscreenElement, null);
   assert.ok(!hidden(), 'exiting fullscreen restores controls');
   advance(); render(); assert.ok(!hidden(), 'normal landscape controls stay visible');
   props.portrait = true; render(); advance(); render(); assert.ok(hidden(), 'portrait retains auto-hide');
   props.windowFill = true; props.onWindowFill = value => { props.windowFill = value; }; render();
-  stageListeners.get('pointermove')(); render(); assert.ok(!hidden()); advance(); render(); assert.ok(hidden(), 'window fill auto-hides');
+  movePointer(); assert.ok(!hidden()); advance(); render(); assert.ok(hidden(), 'window fill auto-hides');
   props.continuing = true; props.available = false; media.pause(); render();
   assert.ok(hidden(), 'window fill keeps controls hidden while auto-next prepares');
   props.continuing = false; props.autoContinue = true; media.ended = true; listeners.get('ended')?.(); render();
@@ -211,6 +264,13 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
         ui.media.play = play; await play(); await ui.flush();
         assert.equal(controls(ui).props.continuing, false, 'actual playing releases shortcut transition state');
         assert.equal(ui.find(node => node.type === 'video').props.src, local ? `file:///mock-${direction === 'previous' ? 1 : 3}.mp4` : `mock:${direction}`);
+        if (direction === 'previous') {
+          ui.find(node => node.type === 'video').props.onEnded(); await ui.flush();
+          assert.equal(controls(ui).props.continuing, true, 'automatic next after previous renews transition protection');
+          assert.equal(ui.find(node => node.type === 'video').props.src, local ? 'file:///mock-2.mp4' : 'mock:middle');
+          ui.metadata(); await ui.flush();
+          assert.equal(controls(ui).props.continuing, false, 'second handoff ends only when automatic next plays');
+        }
         ui.unmount();
       }
     }
@@ -233,5 +293,5 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     assert.equal(controls(blocked).props.continuing, false, 'autoplay rejection must leave the play control accessible');
     blocked.unmount();
   }
-  console.log('PASS video controls: default/custom previous/next keydown/keyup/reset/preparation/source/metadata/playing, local/online shortcut matrix, input/menu boundaries, play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
+  console.log('PASS video controls: previous-to-auto-next continuity with stationary-pointer/video-focus/early-pause events; real movement/click/Tab/focused-control/manual-pause access; persistent-pause recovery; default/custom previous/next keydown/keyup/reset/preparation/source/metadata/playing, local/online shortcut matrix, input/menu boundaries, play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

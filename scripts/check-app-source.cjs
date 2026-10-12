@@ -24,7 +24,7 @@ function encodedKey() {
   raw[0] = 48 ^ raw[1] ^ raw[2];
   return raw.toString('base64');
 }
-function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', media = 'https://v3-reading.qznovelvod.com/video.mp4', redirect = '', malformedKey = false } = {}) {
+function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', media = 'https://v3-reading.qznovelvod.com/video.mp4', redirect = '', malformedKey = false, videoList = null, encrypted = true } = {}) {
   const calls = [];
   const seed = Buffer.alloc(16, 7);
   const constants = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
@@ -43,7 +43,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       return { status: 200, headers: {}, data: JSON.stringify({ code: 0, data: { '999': model, ...(wrongVid ? {} : { '11': model }) } }) };
     }
     if (redirect) return { status: 302, headers: { location: redirect }, data: '' };
-    return { status: 200, headers: {}, data: JSON.stringify({ video_info: { data: { key_seed: seed.toString('base64'), video_list: {
+    return { status: 200, headers: {}, data: JSON.stringify({ video_info: { data: { key_seed: encrypted ? seed.toString('base64') : null, video_list: videoList || {
       bad: { main_url: media, codec_type: 'bytevc2', quality_desc: '2160P', spade_a: encodedKey() },
       good: { main_url: encryptedUrl, codec_type: 'h264', quality_desc: '720P', spade_a: malformedKey ? 'bad' : encodedKey() },
     } } } }) };
@@ -63,7 +63,74 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
   return { fetch: context.module.exports.fetchAppPlayUrl, calls };
 }
 
+function nativeFixture() {
+  const pending = [];
+  const context = { module: { exports: {} }, Buffer, URL, process: { env: {} },
+    require: name => name === 'axios' ? { get: () => new Promise(resolve => pending.push(resolve)) } : require(name),
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'hongguo.js'), 'utf8') + '\nmodule.exports.parseModelVideo = parseModelVideo;', context);
+  return { ...context.module.exports, pending,
+    finish(index, name) { pending[index]({ data: JSON.stringify({ main_url: `https://media.example/${name}.mp4` }) }); },
+  };
+}
+const mediaUrl = name => `https://v3-reading.qznovelvod.com/${name}.mp4`;
+const appRows = videoList => fixture({ videoList, encrypted: false }).fetch('11');
+const turn = () => new Promise(resolve => setImmediate(resolve));
+
 const checks = [
+  ['App H264 takes priority over higher-resolution HEVC', async () => {
+    const result = await appRows({ hd: { main_url: mediaUrl('hevc'), codec_type: 'hevc', quality_desc: '1080P' },
+      sd: { main_url: mediaUrl('avc'), codec_type: 'h264', quality_desc: '720P' } });
+    assert.equal(result.url, mediaUrl('avc'));
+  }],
+  ['App invalid or missing main URL keeps validated same-stream backup', async () => {
+    for (const main_url of ['', 'https://127.0.0.1/private', 'https://v3-reading.qznovelvod.com.attacker.test/video', 'http://v3-reading.qznovelvod.com/video']) {
+      const result = await appRows({ one: { main_url, backup_url: mediaUrl('backup'), codec_type: 'h264' } });
+      assert.equal(result.url, mediaUrl('backup'));
+    }
+  }],
+  ['App skips unusable candidate but never ignores an invalid encryption key', async () => {
+    const result = await appRows({ broken: { main_url: mediaUrl('broken'), codec_type: 'h264', quality_desc: '1080P', spade_a: 'bad' },
+      working: { main_url: mediaUrl('working'), codec_type: 'h264', quality_desc: '720P', spade_a: encodedKey() } });
+    assert.equal(result.url, mediaUrl('working'));
+    assert.equal(result.contentKey, keyHex);
+    await assert.rejects(appRows({ one: { main_url: 'https://127.0.0.1/private', backup_url: 'file:///private', codec_type: 'h264' } }));
+  }],
+  ['legacy parser prefers H264 and keeps a usable backup', async () => {
+    const { parseModelVideo } = nativeFixture();
+    const choose = rows => parseModelVideo(JSON.stringify({ video_list: rows }));
+    assert.equal(choose([{ main_url: mediaUrl('hevc'), video_meta: { codec_type: 'h265', definition: '1080p' } },
+      { main_url: mediaUrl('avc'), video_meta: { codec_type: 'H264', definition: '720p' } }])[0], mediaUrl('avc'));
+    assert.equal(choose([{ main_url: 'not a URL', backup_url: mediaUrl('backup'), video_meta: { codec_type: 'h264' } }])[0], mediaUrl('backup'));
+    assert.equal(choose([{ main_url: 'file:///private', backup_url: 'https://user:pass@example.com/video' }])[0], null);
+  }],
+  ['forced lookup bypasses settled play URL cache', async () => {
+    const f = nativeFixture();
+    const first = f.fetchPlayUrlSingle('11', '1'); await turn(); f.finish(0, 'old'); await first;
+    const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
+    assert.equal(f.pending.length, 2, 'force must fetch a new address');
+    f.finish(1, 'new'); await forced;
+    assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
+  }],
+  ['old in-flight lookup cannot overwrite forced cache or remove forced pending', async () => {
+    for (const oldFinishesFirst of [true, false]) {
+      const f = nativeFixture();
+      const old = f.fetchPlayUrlSingle('11', '1'); await turn();
+      const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
+      assert.equal(f.pending.length, 2, 'force must bypass old in-flight request');
+      if (oldFinishesFirst) {
+        f.finish(0, 'old'); await old;
+        const joined = f.fetchPlayUrlSingle('11', '1'); await turn();
+        assert.equal(f.pending.length, 2, 'old completion must preserve forced request');
+        f.finish(1, 'new'); await forced;
+        assert.equal((await joined).url, 'https://media.example/new.mp4');
+      } else {
+        f.finish(1, 'new'); await forced;
+        f.finish(0, 'old'); await old;
+      }
+      assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
+    }
+  }],
   ['pure JS SM3 vectors', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'sm3.js')), 'pure JS SM3 missing');
     const sm3 = require(path.join(nativeDir, 'sm3'));

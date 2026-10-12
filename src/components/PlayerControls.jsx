@@ -21,6 +21,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
   const menuButtonRef = useRef(null);
   const speedRef = useRef(null);
   const episodeKeysRef = useRef(new Set());
+  const pointerRef = useRef(null);
   const expanded = fullscreen || windowFill;
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
   useEffect(() => {
     const stage = stageRef.current;
     let timer;
+    let pauseTimer;
     let dragging = false;
     const scheduleHide = () => {
       clearTimeout(timer);
@@ -56,7 +58,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
         }, 2000);
       }
     };
-    const reveal = () => { setControlsHidden(false); scheduleHide(); };
+    const reveal = () => { clearTimeout(pauseTimer); setControlsHidden(false); scheduleHide(); };
     const onKey = event => {
       const physicalKey = event.code || event.key;
       // Keep the release paired across source/effect changes, even if Shift is released first.
@@ -69,12 +71,24 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
       }
       reveal();
     };
-    const startDrag = event => { if (event.target.closest('input[type="range"]')) { dragging = true; reveal(); } };
+    const onPointerMove = event => {
+      const previous = pointerRef.current;
+      pointerRef.current = { x: event.screenX, y: event.screenY };
+      // Native fullscreen/source changes can dispatch a move without moving the pointer.
+      if (previous ? previous.x === event.screenX && previous.y === event.screenY : !event.movementX && !event.movementY) return;
+      reveal();
+    };
+    const startDrag = event => { dragging = !!event.target.closest?.('input[type="range"]'); reveal(); };
     const stopDrag = () => { if (dragging) { dragging = false; reveal(); } };
-    stage?.addEventListener('pointermove', reveal);
+    const onFocus = event => {
+      // Tab and pointerdown reveal immediately; media focus churn is not user activity.
+      if (controlsRef.current?.contains(event.target)) reveal();
+      else scheduleHide();
+    };
+    stage?.addEventListener('pointermove', onPointerMove);
     stage?.addEventListener('pointerdown', startDrag);
-    stage?.addEventListener('focusin', reveal);
-    stage?.addEventListener('focusout', reveal);
+    stage?.addEventListener('focusin', onFocus);
+    stage?.addEventListener('focusout', scheduleHide);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('keyup', onKey, true);
     window.addEventListener('pointerup', stopDrag);
@@ -82,14 +96,21 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
     const onBlur = () => { episodeKeysRef.current.clear(); stopDrag(); };
     window.addEventListener('blur', onBlur);
     // Source changes and automatic handoffs are not user activity.
-    if (!(portrait || expanded) || menuOpen || (!continuing && (!available || (media.paused && !(media.ended && autoContinue))))) reveal();
-    else scheduleHide();
+    if (!(portrait || expanded) || menuOpen || (!continuing && !available)) reveal();
+    else if (!continuing && media.paused && !(media.ended && autoContinue)) {
+      // A native pause can precede ended; explicit key/click pauses already reveal immediately.
+      if (autoContinue && controlsHidden) pauseTimer = setTimeout(() => {
+        if (videoRef.current?.paused && !videoRef.current.ended) reveal();
+      }, 120);
+      else reveal();
+    } else scheduleHide();
     return () => {
       clearTimeout(timer);
-      stage?.removeEventListener('pointermove', reveal);
+      clearTimeout(pauseTimer);
+      stage?.removeEventListener('pointermove', onPointerMove);
       stage?.removeEventListener('pointerdown', startDrag);
-      stage?.removeEventListener('focusin', reveal);
-      stage?.removeEventListener('focusout', reveal);
+      stage?.removeEventListener('focusin', onFocus);
+      stage?.removeEventListener('focusout', scheduleHide);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKey, true);
       window.removeEventListener('pointerup', stopDrag);

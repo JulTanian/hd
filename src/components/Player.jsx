@@ -67,6 +67,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const [autoCompat, setAutoCompat] = useState(true);
   const [compatMap, setCompatMap] = useState({});         // vidIndex -> 转码后 url
   const [compatProgress, setCompatProgress] = useState(null); // {vidIndex, percent}
+  const [compatError, setCompatError] = useState('');
   const [decodeFailed, setDecodeFailed] = useState(false);    // 当前集解不出画面
   const [playbackError, setPlaybackError] = useState('');
   const [playbackVersion, setPlaybackVersion] = useState(0);
@@ -91,6 +92,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const pendingTargetRef = useRef(null);
   const loadedMediaRef = useRef(null);
   const autoCompatAttemptRef = useRef(null);
+  const reconnectAttemptRef = useRef(null);
+  const onlineSourceRef = useRef(null);
   const lastVideoSrcRef = useRef('');
   const lastLoadRef = useRef(null);
 
@@ -150,6 +153,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     setMediaBuffering(false);
     setCompatProgress(null);
     setDecodeFailed(false);
+    setCompatError('');
     setPlaybackError('');
     lastSavedRef.current = 0;
   }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
@@ -372,7 +376,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const playableSource = compatUrl || (isOnlinePlaying ? onlineUrl : current?.fileUrl) || '';
   // 原生全屏依附于 video 节点。准备下一集时保留结束帧，换源不换节点。
   if (canPlay) lastVideoSrcRef.current = playableSource;
-  const videoSrc = lastVideoSrcRef.current;
+  const videoSrc = compatProgress ? '' : lastVideoSrcRef.current;
 
   useEffect(() => {
     const v = videoRef.current;
@@ -381,7 +385,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     lastLoadRef.current = { source: videoSrc, version: playbackVersion };
     v.defaultPlaybackRate = playbackRateRef.current;
     // 相同地址的显式重试不会触发 src 变更，用原生 load 重置媒体即可。
-    if (previous?.source === videoSrc && previous.version !== playbackVersion) v.load();
+    if (previous?.source === videoSrc && previous.version !== playbackVersion) { v.src = videoSrc; v.load(); }
     v.playbackRate = playbackRateRef.current;
   }, [loading, canPlay, videoSrc, playbackVersion]);
 
@@ -389,16 +393,21 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
 
   /** 转码当前集为 H.264 后播放（解决本机无法解码 HEVC 的黑屏问题） */
   const startCompatPlay = useCallback(
-    async (vidIndex) => {
+    async (vidIndex, force = false) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (!ep || ep.locked) return;
       const request = { requestId: crypto.randomUUID(), seriesId: String(activeSeriesId), vidIndex, version: mediaVersion.current };
       if (compatRequestRef.current?.version === request.version && compatRequestRef.current?.vidIndex === vidIndex) return;
-      autoCompatAttemptRef.current = request.version;
+      autoCompatAttemptRef.current = { version: request.version, force };
       pendingSeekRef.current = currentPosition();
       persistPosition(true);
       videoRef.current?.pause();
+      loadedMediaRef.current = null;
+      // Windows must release the failed cache before FFmpeg replaces it. Keep the fullscreen node.
+      videoRef.current?.removeAttribute('src');
+      videoRef.current?.load();
       compatRequestRef.current = request;
+      setCompatError('');
       setCompatProgress({ vidIndex, percent: 0 });
       try {
         const res = await window.electronAPI.transcodeForPlayback({
@@ -406,12 +415,15 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
           seriesId: activeSeriesId,
           vidIndex,
           vid: ep.vid,
-          filePath: ep.savePath || null,
+          filePath: isOnlinePlaying ? null : ep.savePath || null,
+          force,
         });
         if (compatRequestRef.current !== request || request.version !== mediaVersion.current) return;
         compatRequestRef.current = null;
         if (res && res.success) {
           loadedMediaRef.current = null;
+          // A fast same-URL result can be batched with the loading state; restore the DOM source explicitly.
+          if (videoRef.current) { videoRef.current.src = res.url; videoRef.current.load(); }
           setCompatMap((prev) => ({ ...prev, [vidIndex]: res.url }));
           setDecodeFailed(false);
           setCompatProgress(null);
@@ -421,17 +433,32 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
           });
         } else {
           setCompatProgress(null);
-          showToast((res && res.error) || '转码失败');
+          if (autoCompat && !res?.cancelled && reconnectOnce()) return;
+          const message = (res && res.error) || '转码失败';
+          setDecodeFailed(true);
+          setCompatError(message);
+          showToast(message);
         }
       } catch (e) {
         if (compatRequestRef.current !== request || request.version !== mediaVersion.current) return;
         compatRequestRef.current = null;
         setCompatProgress(null);
+        if (autoCompat && reconnectOnce()) return;
+        setDecodeFailed(true);
+        setCompatError('转码异常: ' + e.message);
         showToast('转码异常: ' + e.message);
       }
     },
-    [episodes, activeSeriesId, showToast, currentPosition, persistPosition]
+    [episodes, activeSeriesId, isOnlinePlaying, autoCompat, reconnectOnce, showToast, currentPosition, persistPosition]
   );
+
+  const tryAutoCompat = useCallback((vidIndex) => {
+    if (!autoCompat) return;
+    const force = !!compatMap[vidIndex];
+    const attempt = autoCompatAttemptRef.current;
+    if (attempt?.version === mediaVersion.current && (!force || attempt.force)) return;
+    startCompatPlay(vidIndex, force);
+  }, [autoCompat, compatMap, startCompatPlay]);
 
   const clearCompatCache = async () => {
     const affected = !!compatMap[currentIndex] || !!compatRequestRef.current;
@@ -468,29 +495,27 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       if (!v) return;
       if (v.videoWidth === 0 && !v.paused && v.currentTime > 0.3) {
         setDecodeFailed(true);
-        if (autoCompat && !compatMap[idx] && autoCompatAttemptRef.current !== version) {
-          showToast('当前视频未显示画面，正在尝试兼容转码…');
-          startCompatPlay(idx);
-        }
+        tryAutoCompat(idx);
       }
     }, 2600);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoCompat, compatMap, currentIndex, startCompatPlay, showToast, playbackVersion, canPlay, videoSrc, persistPosition]);
+  }, [currentIndex, tryAutoCompat, playbackVersion, canPlay, videoSrc, persistPosition]);
 
   /**
    * 在线播放：明文片源按需加载，加密片源准备后返回播放地址。
    * 不占用下载目录；加密片源的准备文件会自动清理。
    */
   const startOnlinePlay = useCallback(
-    async (vidIndex, resumeAt) => {
+    async (vidIndex, resumeAt, force = false) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (ep?.locked) { showToast('这一集需在来源平台解锁'); return; }
       if (!ep || !ep.vid) {
         showToast('这一集暂时无法播放，请重新获取剧集后重试');
         return;
       }
+      onlineSourceRef.current = `${activeSeriesId}:${vidIndex}`;
       const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
-      const prefetched = prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId ? prefetchRef.current : null;
+      const prefetched = !force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId ? prefetchRef.current : null;
       if (prefetched) prefetchRef.current = null;
       resetPlayback();
       setCompatMap(prev => { const next = { ...prev }; delete next[vidIndex]; return next; });
@@ -510,6 +535,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
           vid: ep.vid,
           seriesId: activeSeriesId,
           vidIndex,
+          force,
         });
         if (onlineRequestRef.current !== request) {
           window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: res?.streamId }).catch(() => {});
@@ -541,15 +567,26 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     [episodes, activeSeriesId, showToast, refreshCacheInfo, resetPlayback, releaseOnline, currentPosition]
   );
 
+  function reconnectOnce() {
+    const key = `${activeSeriesId}:${currentIndex}`;
+    if (!current?.vid || current.locked || reconnectAttemptRef.current === key) return false;
+    reconnectAttemptRef.current = key;
+    showToast('正在重新获取本集片源…');
+    startOnlinePlay(currentIndex, currentPosition(), true);
+    return true;
+  }
+
   // 切集
   const goToEpisode = useCallback(
     (vidIndex, resumeAt) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (!ep || ep.locked) return;
+      reconnectAttemptRef.current = null;
       if (ep.status !== 'completed' || !ep.fileUrl) {
         startOnlinePlay(vidIndex, resumeAt);
         return;
       }
+      onlineSourceRef.current = null;
       const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
       resetPlayback();
       setCurrentIndex(vidIndex);
@@ -561,7 +598,10 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
 
   const retryPlayback = () => {
     setCompatMap(prev => { const next = { ...prev }; delete next[currentIndex]; return next; });
-    goToEpisode(currentIndex, currentPosition());
+    if (onlineSourceRef.current === `${activeSeriesId}:${currentIndex}` || current?.status !== 'completed') {
+      reconnectAttemptRef.current = null;
+      startOnlinePlay(currentIndex, currentPosition(), true);
+    } else goToEpisode(currentIndex, currentPosition());
   };
 
   // 找下一集（按集号顺序）
@@ -720,6 +760,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     const version = ++selectionVersion.current;
     selectedSeriesRef.current = String(sid);
     pendingTargetRef.current = null;
+    reconnectAttemptRef.current = null;
+    onlineSourceRef.current = null;
     resetPlayback();
     setCompatMap({});
     setActiveSeriesId(String(sid));
@@ -1214,10 +1256,11 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             onWaiting={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(true); }}
             onCanPlay={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(false); }}
             onError={(event) => {
-              if (!canPlay || playbackVersion !== mediaVersion.current) return;
+              if (!canPlay || compatRequestRef.current || playbackVersion !== mediaVersion.current) return;
               if (videoRef.current && event.currentTarget !== videoRef.current) return;
               if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== videoSrc) return;
               const failedDecode = [3, 4].includes(event.currentTarget.error?.code);
+              if (!failedDecode && event.currentTarget.error?.code === 2 && reconnectOnce()) return;
               if (!failedDecode) {
                 const seekTo = currentPosition(); resetPlayback(); pendingSeekRef.current = seekTo;
                 setPlaybackError('视频加载失败，请重试本集或检查网络');
@@ -1225,7 +1268,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               setMediaBuffering(false);
               setDecodeFailed(failedDecode);
               showToast(failedDecode ? '视频解码失败，可选择兼容播放' : '视频加载失败，请重试本集或检查网络');
-              if (failedDecode && autoCompat && !compatUrl && autoCompatAttemptRef.current !== mediaVersion.current) startCompatPlay(currentIndex);
+              if (failedDecode) tryAutoCompat(currentIndex);
             }}
           />
         <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
@@ -1236,7 +1279,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             {playbackError ? (
               <><Film size={34} /><p role="alert">{playbackError}</p><div className="player-placeholder-actions">
                 <button className="btn btn-primary" onClick={retryPlayback}>{current?.status === 'completed' ? '重试本集' : '重试本集（在线播放）'}</button>
-                {current?.status === 'completed' && <button className="btn btn-outline" onClick={() => startOnlinePlay(currentIndex)}>重新连接片源</button>}
+                {current?.status === 'completed' && <button className="btn btn-outline" onClick={() => startOnlinePlay(currentIndex, undefined, true)}>重新连接片源</button>}
               </div></>
             ) : onlineProgress && onlineProgress.vid && (!current || current.vid === onlineProgress.vid) ? (
               <>
@@ -1327,16 +1370,16 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
           <div className="compat-overlay">
             <Film size={30} />
             <p>当前片源无法正常解码</p>
-            <span className="compat-overlay-sub">
-              可以重新连接片源，或尝试转码为 H.264 兼容格式。
+            <span className="compat-overlay-sub" role={compatError ? 'alert' : undefined}>
+              {compatError || '可以重新连接片源，或尝试重新转码为 H.264 兼容格式。'}
             </span>
             <div className="player-placeholder-actions">
               <button className="btn btn-primary" onClick={retryPlayback}>重试本集</button>
-              <button className="btn btn-outline" onClick={() => startOnlinePlay(currentIndex)}>重新连接片源</button>
-              {!compatUrl && <button className="btn btn-outline" onClick={() => startCompatPlay(currentIndex)}>
+              <button className="btn btn-outline" onClick={() => startOnlinePlay(currentIndex, undefined, true)}>重新连接片源</button>
+              <button className="btn btn-outline" onClick={() => startCompatPlay(currentIndex, true)}>
                 <Zap size={15} />
-                转码后播放
-              </button>}
+                重新转码后播放
+              </button>
               <button className="btn btn-outline" onClick={toggleAutoCompat}>
                 {autoCompat ? '关闭自动转码' : '开启自动转码'}
               </button>

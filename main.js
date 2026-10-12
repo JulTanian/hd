@@ -109,9 +109,10 @@ function releaseOnlineSession(id) {
   if (!session) return;
   onlineSessions.delete(id);
   for (const controller of session.requests) controller.abort();
-  if (![...onlineSessions.values()].some(s => s.vid === session.vid)) {
-    const pending = onlinePreparing.get(session.vid);
-    if (pending) { pending.controller.abort(); onlinePreparing.delete(session.vid); }
+  const pending = session.job;
+  if (pending && ![...onlineSessions.values()].some(s => s.job === pending)) {
+    pending.controller.abort();
+    if (onlinePreparing.get(session.vid) === pending) onlinePreparing.delete(session.vid);
   }
 }
 
@@ -589,7 +590,7 @@ async function executeHongguoDownload(task) {
     // pipeline rejects on either side and destroys both streams (including abrupt CDN close).
     await pipeline(response.data, writer);
     source.token.throwIfRequested();
-    if (totalLength && received !== totalLength) throw new Error('视频下载不完整，请重试');
+    if (!received || (totalLength && received !== totalLength)) throw new Error('视频下载不完整，请重试');
     if (playInfo.contentKey) {
       const decodedPath = tmpPath + '.decoded';
       try {
@@ -1537,14 +1538,28 @@ async function requestMedia(playInfo, options = {}) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('无效播放地址');
   const config = { method: 'GET', url: url.href, responseType: 'stream', timeout: 60000, ...options,
     headers: { 'User-Agent': hongguo.UA, 'Accept-Encoding': 'identity', ...options.headers } };
-  try { return await axios(config); }
+  let response;
+  try { response = await axios(config); }
   catch (error) {
     // Drain nothing from rejected bodies: destroy to release the underlying socket.
     error.response?.data?.destroy?.();
     if (error.response?.status !== 403) throw error;
-    try { return await axios({ ...config, headers: { ...config.headers, Referer: hongguo.VIDEO_REFERER } }); }
+    try { response = await axios({ ...config, headers: { ...config.headers, Referer: hongguo.VIDEO_REFERER } }); }
     catch (retryError) { retryError.response?.data?.destroy?.(); throw retryError; }
   }
+  if ([200, 206].includes(response.status) && /(?:text\/html|application\/json)/i.test(response.headers['content-type'] || '')) {
+    response.data.destroy();
+    throw new Error('片源返回了错误页面，请重新获取片源');
+  }
+  if (config.method === 'GET' && !config.headers.Range && response.status === 206) {
+    const range = /^bytes 0-(\d+)\/(\d+)$/.exec(response.headers['content-range'] || '');
+    if (!range || Number(range[1]) + 1 !== Number(range[2])) {
+      response.data.destroy();
+      throw new Error('视频响应不完整，请重新获取片源');
+    }
+    response.headers['content-length'] = range[2];
+  }
+  return response;
 }
 
 /** Proxy only addresses resolved by our native provider, never renderer-supplied URLs. */
@@ -1630,14 +1645,10 @@ function registerLocalProtocol() {
         return new Response('not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
       }
 
-      const range = request.headers.get('range');
+      const range = mediaRange(request.headers.get('range'), size);
+      if (range === false) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
       if (range) {
-        const m = /bytes=(\d*)-(\d*)/.exec(range);
-        let start = m && m[1] ? parseInt(m[1], 10) : 0;
-        let end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-        if (Number.isNaN(start) || start < 0) start = 0;
-        if (Number.isNaN(end) || end >= size) end = size - 1;
-        if (start > end) start = 0;
+        const { start, end } = range;
         return new Response(request.method === 'HEAD' ? null : fs.createReadStream(filePath, { start, end }), {
           status: 206,
           headers: {
@@ -1712,8 +1723,8 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
 }
 
 /** Encrypted sources and compatibility transcoding still require the complete MP4. */
-async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity) {
-  playInfo = playInfo || await hongguo.fetchPlayUrlSingle(vid, seriesId);
+async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity, force = false) {
+  playInfo = playInfo || await hongguo.fetchPlayUrlSingle(vid, seriesId, { force });
   if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
   if (signal?.aborted) throw new Error('已取消播放');
   if (playInfo.contentKey && !/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
@@ -1735,7 +1746,7 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
         }
       });
       await pipeline(response.data, fs.createWriteStream(input, { mode: 0o600 }), { signal });
-      if (total && received !== total) throw new Error('视频下载不完整，请重试');
+      if (!received || (total && received !== total)) throw new Error('视频下载不完整，请重试');
       if (onProgress) onProgress(received, received, 'decrypting');
       await decryptContentKeyFile(input, output, playInfo.contentKey, { signal });
       return await fsp.readFile(output);
@@ -1753,7 +1764,7 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
     }
   }
   if (signal?.aborted) throw new Error('已取消播放');
-  if (total && received !== total) throw new Error('视频下载不完整，请重试');
+  if (!received || (total && received !== total)) throw new Error('视频下载不完整，请重试');
   let buf = Buffer.concat(chunks);
   if (playInfo.spadeA) {
     if (onProgress) onProgress(buf.length, buf.length, 'decrypting');
@@ -1765,23 +1776,24 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
 }
 
 ipcMain.handle('prepare-online-play', async (event, payload) => {
-  const { vid, seriesId, vidIndex, requestId, prefetch = false } = payload || {};
+  const { vid, seriesId, vidIndex, requestId, prefetch = false, force = false } = payload || {};
   if (!vid) return { success: false, error: '缺少 vid' };
   const key = String(vid), streamId = randomUUID();
   const session = { vid: key, requestId, requests: new Set(), entry: null };
   onlineSessions.set(streamId, session);
   try {
-    const checkedPlayInfo = /^(xifan|hema):/.test(key) ? await hongguo.fetchPlayUrlSingle(key, seriesId) : null;
+    const checkedPlayInfo = /^(xifan|hema):/.test(key) ? await hongguo.fetchPlayUrlSingle(key, seriesId, { force }) : null;
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     if (checkedPlayInfo && !checkedPlayInfo.url) throw new Error(checkedPlayInfo.error || '来源未开放该集');
+    if (force) onlineCache.delete(key);
     let entry = onlineCache.get(key), cached = !!entry;
     if (!entry) {
       let job = onlinePreparing.get(key);
-      if (!job) {
+      if (!job || (force && !job.force)) {
         const controller = new AbortController();
-        job = { controller };
+        job = { controller, force };
         job.promise = (async () => {
-          const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(key, seriesId);
+          const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(key, seriesId, { force });
           if (controller.signal.aborted) throw new Error('已取消播放');
           if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
           const prepared = { size: 0, lastUsed: Date.now(), seriesId: String(seriesId || ''), vidIndex: Number(vidIndex) || 0 };
@@ -1794,11 +1806,12 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
           }, seriesId, playInfo, controller.signal, prefetch ? ONLINE_MAX_BYTES : Infinity);
           if (controller.signal.aborted) throw new Error('已取消播放');
           prepared.size = prepared.buffer.length;
-          onlineCache.set(key, prepared); trimOnlineCache();
+          if (onlinePreparing.get(key) === job) { onlineCache.set(key, prepared); trimOnlineCache(); }
           return prepared;
         })().finally(() => { if (onlinePreparing.get(key) === job) onlinePreparing.delete(key); });
         onlinePreparing.set(key, job);
       }
+      session.job = job;
       entry = await job.promise;
     }
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
@@ -2032,14 +2045,14 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
     const ffprobePath = resolveFfmpeg('ffprobe');
     if (!ffmpegPath) return { success: false, error: '未找到 ffmpeg，无法转码' };
 
-    // 1) 解析输入文件：优先本地已下载；否则先取在线缓存并落临时文件
+    // 1) 优先本地原件；强制重建时跳过在线缓存，重新获取输入。
     let inputPath = filePath || null;
     if (!inputPath || !fs.existsSync(inputPath)) {
       const vid = payload.vid;
       if (!vid) return { success: false, error: '既没有本地文件，也没有 vid' };
-      let buf = onlineCache.has(String(vid)) ? onlineCache.get(String(vid)).buffer : null;
+      let buf = !force && onlineCache.has(String(vid)) ? onlineCache.get(String(vid)).buffer : null;
       if (!buf) {
-        buf = await fetchDecryptedEpisode(String(vid), () => {}, seriesId, undefined, signal);
+        buf = await fetchDecryptedEpisode(String(vid), () => {}, seriesId, undefined, signal, Infinity, !!force);
       }
       checkCancelled();
       tmpInput = path.join(getCompatDir(), `.tmp_${randomUUID()}.mp4`);
@@ -2049,78 +2062,86 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
 
     const duration = ffprobePath ? await probeDuration(ffprobePath, inputPath, job) : 0;
     checkCancelled();
-    const encoder = await pickH264Encoder(ffmpegPath, job);
+    let encoder = force ? 'libx264' : await pickH264Encoder(ffmpegPath, job);
     checkCancelled();
 
-    // 2) 转码（硬件编码器用各自推荐的参数）
-    const encArgs = encoder === 'libx264'
-      ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-profile:v', 'high', '-level', '4.2']
-      : encoder === 'h264_videotoolbox'
-      ? ['-c:v', 'h264_videotoolbox', '-b:v', '6M', '-pix_fmt', 'yuv420p']
-      : encoder === 'h264_nvenc'
-      ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-b:v', '0']
-      : encoder === 'h264_qsv'
-      ? ['-c:v', 'h264_qsv', '-global_quality', '23']
-      : encoder === 'h264_amf'
-      ? ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23']
-      : ['-c:v', encoder, '-cq', '23'];
-
-    tmpOut = out + '.part';
-    try { fs.existsSync(tmpOut) && fs.unlinkSync(tmpOut); } catch (_) {}
-
-    const { spawn } = require('child_process');
-    const args = [
-      '-y', '-hide_banner', '-i', inputPath,
-      ...encArgs,
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-progress', 'pipe:1', '-nostats',
-      '-f', 'mp4', tmpOut,
-    ];
-
-    console.log(`[Compat] 转码 第${vidIndex}集  编码器=${encoder}  时长=${duration.toFixed(0)}s`);
     const started = Date.now();
-    let stderrTail = '';
-    const code = await new Promise((resolve) => {
-      const child = spawn(ffmpegPath, args, { windowsHide: true });
-      let killTimer;
-      const abort = () => {
-        try { child.kill('SIGTERM'); } catch (_) {}
-        killTimer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 2000);
-        killTimer.unref?.();
-      };
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) abort();
-      let buf = '';
-      child.stdout.on('data', (d) => {
-        buf += d.toString();
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const line of lines) {
-          const m = line.match(/^out_time_us=(\d+)/);
-          if (m && duration > 0) {
-            const sec = parseInt(m[1], 10) / 1e6;
-            const pct = Math.max(0, Math.min(99, Math.floor((sec / duration) * 100)));
-            reportProgress({ seriesId: String(seriesId), vidIndex: Number(vidIndex), percent: pct });
-          }
-        }
-      });
-      child.stderr.on('data', (d) => { stderrTail = (stderrTail + d.toString()).slice(-1500); });
-      child.on('error', (e) => { stderrTail += ' | spawn: ' + e.message; resolve(-1); });
-      child.on('close', (c) => {
-        signal.removeEventListener('abort', abort);
-        clearTimeout(killTimer);
-        resolve(c);
-      });
-    });
-    checkCancelled();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      checkCancelled();
+      // 2) 转码（硬件编码器用各自推荐的参数）
+      const encArgs = encoder === 'libx264'
+        ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-profile:v', 'high', '-level', '4.2']
+        : encoder === 'h264_videotoolbox'
+        ? ['-c:v', 'h264_videotoolbox', '-b:v', '6M', '-pix_fmt', 'yuv420p']
+        : encoder === 'h264_nvenc'
+        ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-b:v', '0']
+        : encoder === 'h264_qsv'
+        ? ['-c:v', 'h264_qsv', '-global_quality', '23']
+        : encoder === 'h264_amf'
+        ? ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23']
+        : ['-c:v', encoder, '-cq', '23'];
 
-    if (code !== 0 || !fs.existsSync(tmpOut)) {
+      tmpOut = out + '.part';
       try { fs.existsSync(tmpOut) && fs.unlinkSync(tmpOut); } catch (_) {}
-      const tail = stderrTail.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
-      console.warn('[Compat] 转码失败 code=', code, tail);
-      return { success: false, error: `转码失败（ffmpeg 退出码 ${code}）${tail ? '：' + tail : ''}` };
+
+      const { spawn } = require('child_process');
+      const args = [
+        '-y', '-hide_banner', '-i', inputPath,
+        ...encArgs,
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-progress', 'pipe:1', '-nostats',
+        '-f', 'mp4', tmpOut,
+      ];
+
+      console.log(`[Compat] 转码 第${vidIndex}集  编码器=${encoder}  时长=${duration.toFixed(0)}s`);
+      let stderrTail = '';
+      const code = await new Promise((resolve) => {
+        const child = spawn(ffmpegPath, args, { windowsHide: true });
+        let killTimer;
+        const abort = () => {
+          try { child.kill('SIGTERM'); } catch (_) {}
+          killTimer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 2000);
+          killTimer.unref?.();
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+        let buf = '';
+        child.stdout.on('data', (d) => {
+          buf += d.toString();
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            const m = line.match(/^out_time_us=(\d+)/);
+            if (m && duration > 0) {
+              const sec = parseInt(m[1], 10) / 1e6;
+              const pct = Math.max(0, Math.min(99, Math.floor((sec / duration) * 100)));
+              reportProgress({ seriesId: String(seriesId), vidIndex: Number(vidIndex), percent: pct });
+            }
+          }
+        });
+        child.stderr.on('data', (d) => { stderrTail = (stderrTail + d.toString()).slice(-1500); });
+        child.on('error', (e) => { stderrTail += ' | spawn: ' + e.message; resolve(-1); });
+        child.on('close', (c) => {
+          signal.removeEventListener('abort', abort);
+          clearTimeout(killTimer);
+          resolve(c);
+        });
+      });
+      checkCancelled();
+
+      if (code !== 0 || !fs.existsSync(tmpOut)) {
+        try { fs.existsSync(tmpOut) && fs.unlinkSync(tmpOut); } catch (_) {}
+        const tail = stderrTail.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
+        console.warn('[Compat] 转码失败 code=', code, tail);
+        if (encoder !== 'libx264') {
+          encoder = 'libx264';
+          continue;
+        }
+        return { success: false, error: `软件转码失败（ffmpeg 退出码 ${code}）${tail ? '：' + tail : ''}` };
+      }
+      break;
     }
 
     fs.renameSync(tmpOut, out);

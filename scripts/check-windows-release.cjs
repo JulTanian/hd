@@ -232,6 +232,8 @@ async function keyHandoff(key, code, expectedSource) {
     window.dispatchEvent(new Event('hongguo:playback-shortcuts-changed'));
     return true;
   })()`);
+  result.shortcutHandoffs.push(await keyHandoff('ArrowDown', 'ArrowDown', down.source));
+  result.shortcutHandoffs.push(await keyHandoff('ArrowUp', 'ArrowUp', firstSource));
   const shortcutScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(out, 'portable-windows-shortcut-hidden.png'), Buffer.from(shortcutScreenshot.data, 'base64'));
   result.checks.push('Actual single-file EXE: trusted default ArrowDown/ArrowUp and custom J/K switch episodes without ended; expected episode returns; every sampled frame retains hidden controls and fullscreen');
@@ -255,18 +257,20 @@ async function keyHandoff(key, code, expectedSource) {
         result.nextPlaying = result.sourceChanged && !video.paused && video.readyState >= 2 && video.currentTime > 0.7;
         if (result.nextPlaying) break;
       }
+      result.source = video.currentSrc;
       return result;
     } finally { video.removeEventListener('ended', ended); }
   })()`);
   assert(automaticHandoff.ended && automaticHandoff.sourceChanged && automaticHandoff.nextPlaying, JSON.stringify(automaticHandoff));
   assert(automaticHandoff.frames > 0 && automaticHandoff.visibleFrames === 0 && !automaticHandoff.fullscreenLost, 'Automatic next episode must keep fullscreen controls hidden: ' + JSON.stringify(automaticHandoff));
+  assert.equal(automaticHandoff.source, down.source, 'Automatic next after default ArrowUp must select the following episode');
   result.automaticHandoff = automaticHandoff;
   const handoffScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(out, 'portable-windows-auto-next-hidden.png'), Buffer.from(handoffScreenshot.data, 'base64'));
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 120, y: 120 });
   await delay(250);
   assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Pointer movement after automatic next episode must restore controls');
-  result.checks.push('Actual single-file EXE: natural ended advances through Player to a second local flower episode; every sampled frame retains hidden controls and fullscreen; pointer movement restores controls');
+  result.checks.push('Actual single-file EXE: after default ArrowUp returns to the previous episode, natural ended advances through Player to the expected second local flower episode; every sampled frame retains hidden controls and fullscreen; pointer movement restores controls');
   await clickControl('退出全屏');
   await delay(2400);
   assert(await evaluate('!document.fullscreenElement && !document.querySelector("video").paused && getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Exiting fullscreen must restore persistent landscape controls while playing');

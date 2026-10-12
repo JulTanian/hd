@@ -237,22 +237,32 @@ async function fetchAppPlayUrl(vid) {
     if (!fallback) throw new Error('App 接口未返回本集片源地址');
     const outer = await requestJson(fallback, { headers: { 'User-Agent': VIDEO_UA } }, deadline, signal);
     const info = outer?.video_info?.data;
-    const rows = Object.values(info?.video_list || {}).filter(item => item && item.main_url).map(item => {
+    const rows = Object.values(info?.video_list || {}).filter(item => item && (item.main_url || item.backup_url)).map(item => {
         const codec = str(item.codec_type || item.video_meta?.codec_type).toLowerCase();
         const codecRank = ['h264', 'avc', 'avc1'].includes(codec) ? 0 : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(codec) ? 1 : 2;
         const quality = str(item.quality_desc || item.definition || item.height || item.vheight || item.video_meta?.definition);
         const pixels = Number(quality.match(/\d+/)?.[0] || 0);
         return { item, codec, codecRank, quality, pixels };
-    }).filter(row => row.codecRank < 2).sort((a, b) => b.pixels - a.pixels || a.codecRank - b.codecRank);
-    const selected = rows[0];
-    if (!selected) throw new Error('本集暂未提供兼容的 H.264/HEVC 片源');
-    const media = info.key_seed
-        ? decryptSpadeUrl(selected.item.main_url, Buffer.from(info.key_seed, 'base64'))
-        : cleanUrl(selected.item.main_url);
-    const url = checkedUrl(media, ['qznovelvod.com', 'fqnovelvod.com', 'douyinvod.com']);
-    const spade = selected.item.spade_a || selected.item.encrypt_info?.spade_a;
-    const key = spade ? deriveContentKey(spade) : null;
-    return { url, contentKey: key ? key.toString('hex') : null, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', quality: selected.quality };
+    }).filter(row => row.codecRank < 2).sort((a, b) => a.codecRank - b.codecRank || b.pixels - a.pixels);
+    if (!rows.length) throw new Error('本集暂未提供兼容的 H.264/HEVC 片源');
+    let lastError;
+    for (const selected of rows) {
+        try {
+            const spade = selected.item.spade_a || selected.item.encrypt_info?.spade_a;
+            const key = spade ? deriveContentKey(spade) : null;
+            for (const candidate of [selected.item.main_url, selected.item.backup_url]) {
+                if (!candidate) continue;
+                try {
+                    const media = info.key_seed
+                        ? decryptSpadeUrl(candidate, Buffer.from(info.key_seed, 'base64'))
+                        : cleanUrl(candidate);
+                    const url = checkedUrl(media, ['qznovelvod.com', 'fqnovelvod.com', 'douyinvod.com']);
+                    return { url, contentKey: key ? key.toString('hex') : null, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', quality: selected.quality };
+                } catch (error) { lastError = error; }
+            }
+        } catch (error) { lastError = error; }
+    }
+    throw lastError || new Error('本集暂未提供有效片源地址');
 }
 
 module.exports = { fetchAppPlayUrl };
