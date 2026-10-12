@@ -75,7 +75,10 @@ async function clickControl(label) {
   assert(probe.streams.some(s => s.codec_name === 'aac'));
   result.checks.push('Bundled FFmpeg encodes H.264/AAC; FFprobe reads output');
   const sid = 'windows-smoke';
-  fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({ settings: { root: mediaDir, watch_updates_enabled: false, watch_sequels_enabled: false }, tasks: [{ id: 'fixture', status: 'completed', savePath: sample, hongguoInfo: { series_id: sid, series_title: 'Windows verification', vid: 'fixture', vid_index: 1 } }], series: [{ series_id: sid, series_title: 'Windows verification', episodes: [{ vid: 'fixture', vid_index: 1, title: 'CC0 flower footage' }] }] }));
+  const secondSample = path.join(mediaDir, 'windows-sample-2.mp4');
+  fs.copyFileSync(sample, secondSample);
+  const fixtureEpisodes = [sample, secondSample].map((savePath, index) => ({ id: `fixture-${index + 1}`, status: 'completed', savePath, hongguoInfo: { series_id: sid, series_title: 'Windows verification', vid: `fixture-${index + 1}`, vid_index: index + 1 } }));
+  fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({ settings: { root: mediaDir, watch_updates_enabled: false, watch_sequels_enabled: false }, tasks: fixtureEpisodes, series: [{ series_id: sid, series_title: 'Windows verification', episodes: fixtureEpisodes.map(task => ({ ...task.hongguoInfo, title: 'CC0 flower footage' })) }] }));
   child = spawn(portable, ['--user-data-dir=' + profile, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9439', '--autoplay-policy=no-user-gesture-required'], { stdio: 'ignore' });
   let target;
   for (let i = 0; i < 150; i++) {
@@ -153,8 +156,38 @@ async function clickControl(label) {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 });
   await delay(2400);
   assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "0"'), 'Resumed fullscreen playback must hide idle controls again');
+  const automaticHandoff = await evaluate(`(async () => {
+    const video = document.querySelector('video');
+    const originalSource = video.currentSrc;
+    const result = { ended: false, sourceChanged: false, nextPlaying: false, frames: 0, visibleFrames: 0, fullscreenLost: false };
+    const ended = () => { result.ended = true; };
+    video.addEventListener('ended', ended, { once: true });
+    // Seeking near the end lets the real media ended event drive Player's automatic next-episode path.
+    video.currentTime = video.duration - 0.3;
+    const deadline = performance.now() + 8000;
+    try {
+      while (performance.now() < deadline) {
+        await new Promise(requestAnimationFrame);
+        result.frames++;
+        const controls = getComputedStyle(document.querySelector('.player-controls'));
+        if (Number(controls.opacity) > 0 || controls.pointerEvents !== 'none') result.visibleFrames++;
+        if (document.fullscreenElement !== document.querySelector('.player-stage')) result.fullscreenLost = true;
+        result.sourceChanged ||= !!video.currentSrc && video.currentSrc !== originalSource;
+        result.nextPlaying = result.sourceChanged && !video.paused && video.readyState >= 2 && video.currentTime > 0.7;
+        if (result.nextPlaying) break;
+      }
+      return result;
+    } finally { video.removeEventListener('ended', ended); }
+  })()`);
+  assert(automaticHandoff.ended && automaticHandoff.sourceChanged && automaticHandoff.nextPlaying, JSON.stringify(automaticHandoff));
+  assert(automaticHandoff.frames > 0 && automaticHandoff.visibleFrames === 0 && !automaticHandoff.fullscreenLost, 'Automatic next episode must keep fullscreen controls hidden: ' + JSON.stringify(automaticHandoff));
+  result.automaticHandoff = automaticHandoff;
+  const handoffScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(out, 'portable-windows-auto-next-hidden.png'), Buffer.from(handoffScreenshot.data, 'base64'));
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 120, y: 120 });
   await delay(250);
+  assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Pointer movement after automatic next episode must restore controls');
+  result.checks.push('Actual single-file EXE: natural ended advances through Player to a second local flower episode; every sampled frame retains hidden controls and fullscreen; pointer movement restores controls');
   await clickControl('退出全屏');
   await delay(2400);
   assert(await evaluate('!document.fullscreenElement && !document.querySelector("video").paused && getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Exiting fullscreen must restore persistent landscape controls while playing');
