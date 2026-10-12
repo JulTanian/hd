@@ -33,7 +33,7 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
     const reveal = () => {
       clearTimeout(timer);
       setControlsHidden(false);
-      if (portrait && available && !media.paused && !menuOpen && !dragging) {
+      if ((portrait || expanded) && available && !media.paused && !menuOpen && !dragging) {
         timer = setTimeout(() => {
           if (!controlsRef.current?.querySelector(':focus-visible')) setControlsHidden(true);
         }, 2000);
@@ -63,7 +63,7 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
       window.removeEventListener('pointercancel', stopDrag);
       window.removeEventListener('blur', stopDrag);
     };
-  }, [portrait, available, media.paused, menuOpen, source, stageRef]);
+  }, [portrait, expanded, available, media.paused, menuOpen, source, stageRef]);
 
   useEffect(() => {
     setMenuOpen(false);

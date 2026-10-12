@@ -37,6 +37,16 @@ async function evaluate(expression) {
   assert(!reply.exceptionDetails, JSON.stringify(reply.exceptionDetails));
   return reply.result.value;
 }
+async function clickControl(label) {
+  const point = await evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)});
+    const rect = button.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+}
 (async () => {
   assert.equal(process.platform, 'win32');
   assert.equal(process.arch, 'x64');
@@ -123,6 +133,33 @@ async function evaluate(expression) {
   result.checks.push('Actual application player plays CC0 flower H.264/AAC through local protocol; pause control works');
   const screenshot = await cdp('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(out, 'portable-windows-playback.png'), Buffer.from(screenshot.data, 'base64'));
+  await clickControl('全屏');
+  await delay(500);
+  assert(await evaluate('document.fullscreenElement === document.querySelector(".player-stage")'), 'Player must enter native fullscreen');
+  await clickControl('播放');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 });
+  await delay(2400);
+  const hidden = await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "0" && getComputedStyle(document.querySelector(".player-controls")).pointerEvents === "none" && !document.querySelector("video").paused');
+  assert(hidden, 'Fullscreen playback must hide idle controls');
+  const fullscreenScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(out, 'portable-windows-fullscreen-hidden.png'), Buffer.from(fullscreenScreenshot.data, 'base64'));
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 120, y: 120 });
+  await delay(250);
+  assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Pointer movement must restore fullscreen controls');
+  await clickControl('暂停');
+  await delay(2400);
+  assert(await evaluate('document.querySelector("video").paused && getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Paused fullscreen controls must stay visible');
+  await clickControl('播放');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 });
+  await delay(2400);
+  assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "0"'), 'Resumed fullscreen playback must hide idle controls again');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 120, y: 120 });
+  await delay(250);
+  await clickControl('退出全屏');
+  await delay(2400);
+  assert(await evaluate('!document.fullscreenElement && !document.querySelector("video").paused && getComputedStyle(document.querySelector(".player-controls")).opacity === "1"'), 'Exiting fullscreen must restore persistent landscape controls while playing');
+  result.fullscreenControls = { idleHidden: true, pointerRestores: true, pausedVisible: true, resumedHidden: true, exitRestores: true };
+  result.checks.push('Actual single-file EXE: fullscreen idle hides controls; pointer restores; pause keeps visible; resume hides; exiting fullscreen restores landscape controls');
   result.passed = true;
   console.log('Windows release smoke: PASS (' + result.checks.length + ' checks)');
 })().catch(error => { result.passed = false; result.error = error.stack; console.error(error.stack); process.exitCode = 1; })
