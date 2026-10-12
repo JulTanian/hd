@@ -47,6 +47,47 @@ async function clickControl(label) {
   await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
 }
+async function keyHandoff(key, code, expectedSource) {
+  assert(await evaluate('!document.querySelector("video").paused && getComputedStyle(document.querySelector(".player-controls")).opacity === "0"'), 'Key handoff must begin during hidden-controls playback');
+  await evaluate(`(() => {
+    const video = document.querySelector('video');
+    const originalSource = video.currentSrc;
+    window.__keyHandoff = { key: ${JSON.stringify(key)}, trusted: false, ended: false, sourceChanged: false, nextPlaying: false, frames: 0, visibleFrames: 0, fullscreenLost: false };
+    const result = window.__keyHandoff;
+    const keydown = event => { if (event.key === result.key) result.trusted = event.isTrusted; };
+    const ended = () => { result.ended = true; };
+    window.addEventListener('keydown', keydown, true);
+    video.addEventListener('ended', ended);
+    window.__keyHandoffDone = (async () => {
+      const deadline = performance.now() + 8000;
+      try {
+        while (performance.now() < deadline) {
+          await new Promise(requestAnimationFrame);
+          result.frames++;
+          const controls = getComputedStyle(document.querySelector('.player-controls'));
+          if (Number(controls.opacity) > 0 || controls.pointerEvents !== 'none') result.visibleFrames++;
+          if (document.fullscreenElement !== document.querySelector('.player-stage')) result.fullscreenLost = true;
+          result.sourceChanged ||= !!video.currentSrc && video.currentSrc !== originalSource;
+          result.nextPlaying = result.sourceChanged && !video.paused && video.readyState >= 2 && video.currentTime > 0.7;
+          if (result.nextPlaying) break;
+        }
+        result.source = video.currentSrc;
+        return result;
+      } finally {
+        window.removeEventListener('keydown', keydown, true);
+        video.removeEventListener('ended', ended);
+      }
+    })();
+    return true;
+  })()`);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key, code });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key, code });
+  const state = await evaluate('window.__keyHandoffDone');
+  assert(state.trusted && !state.ended && state.sourceChanged && state.nextPlaying, 'Real shortcut must switch without natural ended: ' + JSON.stringify(state));
+  assert(state.frames > 0 && state.visibleFrames === 0 && !state.fullscreenLost, 'Shortcut must retain hidden controls/fullscreen every sampled frame: ' + JSON.stringify(state));
+  if (expectedSource) assert.equal(state.source, expectedSource, key + ' must select the expected episode');
+  return state;
+}
 (async () => {
   assert.equal(process.platform, 'win32');
   assert.equal(process.arch, 'x64');
@@ -120,6 +161,15 @@ async function clickControl(label) {
   result.checks.push('Portrait/landscape, always-on-top and integrated episode panel');
   const episodes = await evaluate(`window.electronAPI.getSeriesEpisodes(${JSON.stringify(sid)})`);
   assert(episodes.success && episodes.data.episodes[0].fileUrl);
+  for (const episode of episodes.data.episodes) {
+    assert.match(episode.fileUrl, /^hongguo-local:\/\/f\/[0-9a-f-]{36}$/i, 'IPC must issue opaque media capabilities');
+  }
+  const rangeRead = await evaluate(`(async () => {
+    const response = await fetch(${JSON.stringify(episodes.data.episodes[0].fileUrl)}, { headers: { Range: 'bytes=0-31' } });
+    return { status: response.status, length: (await response.arrayBuffer()).byteLength };
+  })()`);
+  assert.deepEqual(rangeRead, { status: 206, length: 32 }, 'Packaged renderer must read media Range through CORS using the IPC-issued URL');
+  result.mediaCapability = { opaque: true, rendererRangeRead: rangeRead };
   assert.equal((await evaluate(`window.electronAPI.playSeries({seriesId:${JSON.stringify(sid)}, vidIndex:1})`)).success, true);
   const played = await evaluate(`(async () => {
     let v;
@@ -131,6 +181,14 @@ async function clickControl(label) {
   })()`);
   assert(played.time > 0.5 && played.width === 640 && played.height === 360, JSON.stringify(played));
   result.playback = played;
+  const canvasRead = await evaluate(`(() => {
+    const video = document.querySelector('video');
+    const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2;
+    const context = canvas.getContext('2d'); context.drawImage(video, 0, 0, 2, 2);
+    return { crossOrigin: video.crossOrigin, bytes: context.getImageData(0, 0, 2, 2).data.length };
+  })()`);
+  assert.deepEqual(canvasRead, { crossOrigin: 'anonymous', bytes: 16 }, 'CORS video must remain origin-clean for visual enhancements');
+  result.mediaCapability.originCleanCanvas = true;
   const paused = await evaluate(`(async () => { document.querySelector('[aria-label="暂停"]').click(); await new Promise(r=>setTimeout(r,100)); return document.querySelector('video').paused; })()`);
   assert.equal(paused, true);
   result.checks.push('Actual application player plays CC0 flower H.264/AAC through local protocol; pause control works');
@@ -156,6 +214,27 @@ async function clickControl(label) {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 });
   await delay(2400);
   assert(await evaluate('getComputedStyle(document.querySelector(".player-controls")).opacity === "0"'), 'Resumed fullscreen playback must hide idle controls again');
+  const firstSource = await evaluate('document.querySelector("video").currentSrc');
+  result.shortcutHandoffs = [];
+  const down = await keyHandoff('ArrowDown', 'ArrowDown');
+  result.shortcutHandoffs.push(down);
+  result.shortcutHandoffs.push(await keyHandoff('ArrowUp', 'ArrowUp', firstSource));
+  await evaluate(`(() => {
+    localStorage.setItem('hongguo:preview:playback-shortcuts:v1', JSON.stringify({ play: 'space', backward: 'arrowleft', forward: 'arrowright', previous: 'k', next: 'j', autoNext: 'a', slower: 's', faster: 'd', fullscreen: 'f' }));
+    window.dispatchEvent(new Event('hongguo:playback-shortcuts-changed'));
+    return true;
+  })()`);
+  await delay(100);
+  result.shortcutHandoffs.push(await keyHandoff('j', 'KeyJ', down.source));
+  result.shortcutHandoffs.push(await keyHandoff('k', 'KeyK', firstSource));
+  await evaluate(`(() => {
+    localStorage.removeItem('hongguo:preview:playback-shortcuts:v1');
+    window.dispatchEvent(new Event('hongguo:playback-shortcuts-changed'));
+    return true;
+  })()`);
+  const shortcutScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(out, 'portable-windows-shortcut-hidden.png'), Buffer.from(shortcutScreenshot.data, 'base64'));
+  result.checks.push('Actual single-file EXE: trusted default ArrowDown/ArrowUp and custom J/K switch episodes without ended; expected episode returns; every sampled frame retains hidden controls and fullscreen');
   const automaticHandoff = await evaluate(`(async () => {
     const video = document.querySelector('video');
     const originalSource = video.currentSrc;

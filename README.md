@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-**1.2.3 正式版已发布**，支持 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。
+**当前源码版本为 1.3（配置版本 1.3.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
 
-[下载 1.2.3 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2.3) · [观看功能介绍](#12-功能介绍视频)
+[下载 1.3 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.3) · [观看功能介绍](#12-功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 
 约 1 分 42 秒，介绍画面缩放、窗口置顶、搜索下载与更新提醒。
 
-[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2.3)
+[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.3)
 
 分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
@@ -60,15 +60,25 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 3. 在「发现短剧」浏览，或在「搜索与下载」输入剧名；打开详情点「立即播放」，也可选择集数加入下载队列。
 4. 下次从「我的剧库」或「观看记录」继续；下载进度、重试和整剧导出在「下载管理」。
 
-**Mac 1.2.3 包已完成 Developer ID 签名、Apple 公证和票据装订**，包括应用与 DMG。公证不代表 App Store 审核或内容授权。**Windows EXE 未签名**，可能出现系统安全提示；首次启动会展开临时运行文件，设置和观看记录仍保存在用户资料目录。
+Mac 正式发行流程包含 Developer ID 签名、Apple 公证和票据装订，实际结果见对应发行页。公证不代表 App Store 审核或内容授权。**Windows EXE 未签名**，可能出现系统安全提示；首次启动会展开临时运行文件，设置和观看记录仍保存在用户资料目录。
 
 发行附件提供应用对应源码、各平台 FFmpeg/x264 对应源码和 `SHA256SUMS.txt`。不要把 GitHub 自动生成的 Source code ZIP 当成可直接运行的软件。
 
 仓库已从 `hongguo-drama-mac` 更名为 `hongguo-drama`，本页 1.2 安装包已修正更新地址。**已安装更名前 1.2 的用户，请手动下载替换一次**；应用标识和用户资料位置保持不变。修订精确源码见发行附件 `hongguo-drama-1.2-source.zip`，原 `v1.2` 标签保留首发历史。
 
-## 1.2.3 修复
+## 1.3 新增与修复
 
-修复横屏进入全屏后播放进度条与控制按钮无法自动隐藏的问题（[#9](https://github.com/jackotom/hongguo-drama/issues/9)）。
+- 全屏控制条隐藏后，使用上一集、下一集快捷键切换，按下、松开及换源阶段保留隐藏状态；支持自定义键位，保留鼠标唤出、暂停及错误恢复。
+- 浅色、深色与跟随系统外观；自定义播放快捷键，冲突提示与恢复默认。
+- 隐身小窗：鼠标移开时暂停并隐藏，移回继续；Esc、Dock 和窗口菜单均可恢复主窗口。
+- 热播刷剧：真实公开热播榜、上一部/下一部、在视频区域滚轮切剧；不是账号个性化推荐。
+- 本机搜索历史联想；当前页按明确来源状态筛选已完结或更新中，未知状态不冒充已完结。
+- 真实公开评分、整剧剧评、单集评论节选；本机收藏及基于已浏览剧集首次公开日期的上新日历。
+- 原画、可调锐化、真实 Anime4K CNNx2M 2×增强。Anime4K 面向动漫，支持不高于 1080p 的输入；显卡或片源不兼容、处理持续过慢时恢复原画，不改下载文件。
+- 播放选项按视频可用高度展开并内部滚动；本地媒体改用进程内随机播放地址，保留安全边界并支持画质处理。
+- 用户主动点击后读取分享链接；公开剧集可复制官方分享页链接。
+
+当前未提供手机号登录、手机账号收藏/点赞/历史同步、弹幕发送或回复、完整未来上新排期、自动下载并安装更新。公开评论只读；收藏与日历只在本机保存。公开页面结构可能变化，来源缺失时显示实际错误或未知状态。
 
 ## 完整功能
 

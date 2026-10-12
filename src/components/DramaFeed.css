@@ -1,0 +1,35 @@
+.drama-feed { max-width: 1100px; margin: 0 auto; color: var(--text-primary); }
+.drama-feed-header, .drama-feed-info { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.drama-feed-header h2 { margin: 0; font-size: 28px; font-weight: 700; }
+.drama-feed-header { margin-bottom: 20px; }
+.drama-feed-categories { display: flex; flex-wrap: wrap; gap: 8px; }
+.drama-feed-source, .drama-feed-hint { color: var(--text-secondary); font-size: 12px; line-height: 1.7; margin: 12px 0 20px; }
+.drama-feed-info { align-items: flex-start; margin: 24px 0 16px; }
+.drama-feed-info > div:first-child { min-width: 0; }
+.drama-feed-info h3 { margin: 0 0 6px; font-size: 20px; overflow-wrap: anywhere; }
+.drama-feed-info p { color: var(--text-secondary); font-size: 12px; line-height: 1.7; margin: 0; }
+.drama-feed-info .drama-feed-intro { max-width: 68ch; margin-top: 8px; font-size: 13px; }
+.drama-feed-navigation { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 8px; }
+.drama-feed-start { display: flex; align-items: center; justify-content: center; gap: 32px; min-height: 350px; padding: 32px; background: var(--bg-card); border-radius: 12px; }
+.drama-feed-start img { width: 170px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 12px; }
+.drama-feed-start > div { max-width: 36ch; }
+.drama-feed-start h3 { margin: 0 0 12px; font-size: 24px; }
+.drama-feed-start p { color: var(--text-secondary); font-size: 14px; line-height: 1.8; margin-bottom: 24px; }
+.drama-feed-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 300px; text-align: center; padding: 32px; }
+.drama-feed-state h3, .drama-feed-state p { margin: 0; }
+.drama-feed-state p { color: var(--text-secondary); line-height: 1.7; max-width: 60ch; overflow-wrap: anywhere; }
+.drama-feed .player-container { max-width: none; }
+.drama-feed .player-header[hidden], .drama-feed .player-series-row[hidden] { display: none; }
+.drama-feed .player-stage { overscroll-behavior: contain; }
+.drama-feed .episodes-collapsed .player-episode-panel { display: none; }
+.drama-feed .player-episode-panel { max-height: 360px; overflow-y: auto; }
+.drama-feed button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 800px) {
+  .drama-feed-header, .drama-feed-info { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .drama-feed-start { gap: 20px; padding: 24px; }
+  .drama-feed-start img { width: 130px; }
+}
+@media (max-width: 520px) {
+  .drama-feed-start { flex-direction: column; text-align: center; }
+  .drama-feed-navigation { flex-shrink: 1; }
+}

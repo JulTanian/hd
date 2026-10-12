@@ -11,7 +11,7 @@
 .browse-genres { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 27px; }
 .genre-chip { padding: 5px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font-size: 12px; }
 .genre-chip:hover { background: var(--bg-inset); }
-.genre-chip.active { background: var(--accent-soft); color: #a5292e; font-weight: 600; }
+.genre-chip.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .browse-loading { display: flex; gap: 10px; align-items: center; color: var(--text-secondary); padding: 22px 0; }
 .browse-grid, .poster-skeletons { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 26px 20px; margin-bottom: 30px; }
 .browse-card { display: block; text-align: left; border: 0; padding: 0; background: transparent; min-width: 0; align-self: start; }
@@ -29,8 +29,8 @@
 .browse-card-tags { display: flex; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
 .browse-tag { font-size: 11px; color: var(--text-secondary); }
 .browse-tag + .browse-tag::before { content: '·'; margin-right: 8px; }
-.poster-skeleton > div { aspect-ratio: 3/4; border-radius: 12px; background: #eeebe6; }
-.poster-skeleton > span { display: block; height: 10px; width: 75%; margin-top: 15px; background: #eeebe6; border-radius: 3px; }
+.poster-skeleton > div { aspect-ratio: 3/4; border-radius: 12px; background: var(--skeleton); }
+.poster-skeleton > span { display: block; height: 10px; width: 75%; margin-top: 15px; background: var(--skeleton); border-radius: 3px; }
 .poster-skeleton > span:last-child { width: 45%; height: 8px; margin-top: 9px; }
 .browse-pager { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 12px 0 24px; flex-wrap: wrap; }
 .pager-item { min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
@@ -61,3 +61,10 @@
 .browse-container .source-control select { width: auto; min-width: 112px; }
 
 .browse-source-note { margin: 0 0 18px; color: var(--text-secondary); font-size: 12px; }
+
+.browse-completion-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; font-size: 12px; color: var(--text-secondary); }
+.browse-completion-filter label { color: var(--text-primary); font-weight: 500; }
+.browse-completion-filter select { flex: 0 0 110px; height: 34px; padding-block: 5px; }
+.browse-completion-filter > span { line-height: 1.7; }
+.browse-completion-label { color: var(--text-secondary); font-size: 11px; margin-top: 4px; }
+.browse-filter-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 40px 16px; text-align: center; color: var(--text-secondary); }

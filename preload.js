@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPublicDetails: (seriesId, vid) => ipcRenderer.invoke('get-public-details', seriesId, vid),
+  setStealthMode: enabled => ipcRenderer.invoke('set-stealth-mode', enabled),
+  onStealthState: cb => {
+    const listener = (_event, state) => cb(state);
+    ipcRenderer.on('stealth-state', listener);
+    return () => ipcRenderer.removeListener('stealth-state', listener);
+  },
   // 应用信息 / 官网链接
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   openAppUpdate: () => ipcRenderer.invoke('open-app-update'),

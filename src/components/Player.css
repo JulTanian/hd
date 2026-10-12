@@ -151,7 +151,7 @@
 .series-row:hover { background: var(--bg-inset); }
 
 .series-row.active {
-  background: rgba(255, 77, 109, 0.07);
+  background: var(--accent-soft);
   border-left: none;
 }
 
@@ -301,18 +301,18 @@
 
 .btn-danger-text {
   color: var(--danger) !important;
-  border-color: rgba(245, 63, 63, 0.4) !important;
+  border-color: var(--danger-border) !important;
 }
 
 .btn-danger-text:hover {
-  background: rgba(245, 63, 63, 0.1) !important;
+  background: var(--danger-bg) !important;
 }
 
 .player-confirm-mask {
   position: fixed;
   inset: 0;
   z-index: 1200;
-  background: rgba(31, 35, 41, 0.45);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -467,8 +467,8 @@
   color: var(--text-secondary);
 }
 
-.player-now-status.status-completed { background: rgba(0, 180, 42, 0.12); color: var(--success); }
-.player-now-status.status-downloading { background: rgba(51, 112, 255, 0.12); color: var(--accent); }
+.player-now-status.status-completed { background: var(--success-bg); color: var(--success); }
+.player-now-status.status-downloading { background: var(--accent-soft); color: var(--accent); }
 
 /* 分集网格 */
 .player-episodes {
@@ -523,7 +523,7 @@
 /* 下载中：蓝色进度填充 */
 .ep-downloading {
   color: var(--accent);
-  border-color: rgba(51, 112, 255, 0.4);
+  border-color: var(--accent-border);
 }
 
 .ep-progress {
@@ -543,12 +543,12 @@
 .ep-failed,
 .ep-stopped {
   color: var(--danger);
-  border-color: rgba(245, 63, 63, 0.3);
+  border-color: var(--danger-border);
 }
 
 /* 已完成：绿色 */
 .ep-completed {
-  border-color: rgba(0, 180, 42, 0.35);
+  border-color: var(--success-border);
   color: var(--text-primary);
   font-weight: 600;
 }
@@ -556,8 +556,8 @@
 /* 当前集：高亮描边 */
 .ep-current {
   border-color: var(--accent) !important;
-  box-shadow: 0 0 0 2px rgba(255, 77, 109, 0.18);
-  background: rgba(255, 77, 109, 0.08);
+  box-shadow: 0 0 0 2px var(--focus-soft);
+  background: var(--accent-soft);
 }
 
 .player-tips {

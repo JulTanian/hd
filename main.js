@@ -10,6 +10,11 @@
  */
 const { app, BrowserWindow, ipcMain, dialog, shell, session, protocol, Menu, Notification, screen } = require('electron');
 const path = require('path');
+const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
+if (IS_PREVIEW) {
+  app.setName('红果短剧预览');
+  app.setPath('userData', path.join(app.getPath('appData'), 'hongguo-experience-preview'));
+}
 const fs = require('fs');
 const fsp = require('fs/promises');
 const axios = require('axios');
@@ -24,9 +29,12 @@ const watchHistory = require('./src/native/watch-history');
 const { fitWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { availableRelease } = require('./src/native/app-update');
+const { fetchPublicDetails } = require('./src/native/public-details');
+const mediaAccess = require('./src/native/media-access').createMediaAccess(process.env.VITE_DEV_SERVER_URL);
 const APP_VERSION = app.getVersion() || '1.0.0';
 
-const APP_TITLE = '红果短剧';
+const APP_TITLE = IS_PREVIEW ? '红果短剧预览' : '红果短剧';
+const { createStealthController } = require('./src/native/stealth-window');
 
 let mainWindow = null;
 let storageError = null;
@@ -62,11 +70,11 @@ const LOCAL_SCHEME = 'hongguo-local';
 protocol.registerSchemesAsPrivileged([
   {
     scheme: STREAM_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
   },
   {
     scheme: LOCAL_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
   },
 ]);
 
@@ -126,7 +134,7 @@ let MAX_CONCURRENT_DOWNLOADS = 3;
 // ===== 设置 =====
 function getDefaultSettings() {
   return {
-    root: app.getPath('downloads'),
+    root: IS_PREVIEW ? path.join(app.getPath('userData'), 'downloads') : app.getPath('downloads'),
     // 文件命名模板：可用变量 剧名(series_title) 集数(vid_index) 标题(ep_title)
     name_format: '剧名 集数',
     max_concurrent: 3,
@@ -135,7 +143,7 @@ function getDefaultSettings() {
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
     cache_next_episode: true,
-    app_updates_enabled: true,
+    app_updates_enabled: !IS_PREVIEW,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -1528,8 +1536,18 @@ async function requestMedia(playInfo, options = {}) {
 }
 
 /** Proxy only addresses resolved by our native provider, never renderer-supplied URLs. */
+function mediaWithCors(handler) {
+  return async request => {
+    const headers = mediaAccess.corsHeaders(request);
+    if (!headers) return new Response('forbidden origin', { status: 403 });
+    const response = await handler(request);
+    for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
+    return response;
+  };
+}
+
 function registerStreamProtocol() {
-  protocol.handle(STREAM_SCHEME, async (request) => {
+  protocol.handle(STREAM_SCHEME, mediaWithCors(async (request) => {
     const url = new URL(request.url);
     const id = url.pathname.replace(/^\/+/, '');
     const session = url.hostname === 'play' && onlineSessions.get(id);
@@ -1563,14 +1581,13 @@ function registerStreamProtocol() {
       cleanup();
       return new Response('media unavailable', { status: controller.signal.aborted ? 499 : 502 });
     }
-  });
+  }));
 }
 
-/** 把本地文件路径转成可被渲染进程播放的 URL */
+/** 发放进程内随机播放地址，不向网页暴露本地路径。 */
 function localPlayUrl(filePath) {
   if (!filePath) return null;
-  const p = path.resolve(String(filePath));
-  return `${LOCAL_SCHEME}://f/${Buffer.from(p, 'utf8').toString('base64url')}`;
+  return mediaAccess.localUrl(filePath);
 }
 
 /**
@@ -1581,11 +1598,10 @@ function localPlayUrl(filePath) {
  * 走自定义协议后开发/打包两种模式行为一致，并且支持 Range 拖动进度。
  */
 function registerLocalProtocol() {
-  protocol.handle(LOCAL_SCHEME, async (request) => {
+  protocol.handle(LOCAL_SCHEME, mediaWithCors(async (request) => {
     try {
-      const url = new URL(request.url);
-      const b64 = url.pathname.replace(/^\/+/, '');
-      const filePath = Buffer.from(b64, 'base64url').toString('utf8');
+      if (!['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 405 });
+      const filePath = mediaAccess.resolveLocal(request.url);
       if (!filePath) {
         return new Response('bad path', { status: 400, headers: { 'Content-Type': 'text/plain' } });
       }
@@ -1610,7 +1626,7 @@ function registerLocalProtocol() {
         if (Number.isNaN(start) || start < 0) start = 0;
         if (Number.isNaN(end) || end >= size) end = size - 1;
         if (start > end) start = 0;
-        return new Response(fs.createReadStream(filePath, { start, end }), {
+        return new Response(request.method === 'HEAD' ? null : fs.createReadStream(filePath, { start, end }), {
           status: 206,
           headers: {
             'Content-Type': 'video/mp4',
@@ -1621,7 +1637,7 @@ function registerLocalProtocol() {
         });
       }
 
-      return new Response(fs.createReadStream(filePath), {
+      return new Response(request.method === 'HEAD' ? null : fs.createReadStream(filePath), {
         status: 200,
         headers: {
           'Content-Type': 'video/mp4',
@@ -1633,7 +1649,7 @@ function registerLocalProtocol() {
       console.error('[Local] 读取失败:', e.message);
       return new Response('error', { status: 500, headers: { 'Content-Type': 'text/plain' } });
     }
-  });
+  }));
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
@@ -2936,7 +2952,7 @@ ipcMain.handle('open-folder', async (event, taskId) => {
 let updateRequest = null;
 let latestAppRelease = null;
 ipcMain.handle('check-app-update', async event => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
+  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
   if (getCurrentSettings().app_updates_enabled === false) {
     latestAppRelease = null;
     return { enabled: false, release: null };
@@ -2954,7 +2970,7 @@ ipcMain.handle('check-app-update', async event => {
   return { enabled, release: latestAppRelease };
 });
 ipcMain.handle('open-app-update', async event => {
-  if (!mainWindow || event.sender !== mainWindow.webContents || !latestAppRelease || getCurrentSettings().app_updates_enabled === false) {
+  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !latestAppRelease || getCurrentSettings().app_updates_enabled === false) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
   try { await shell.openExternal(latestAppRelease.url); return { success: true }; }
@@ -2962,11 +2978,17 @@ ipcMain.handle('open-app-update', async event => {
 });
 
 // ===== 应用信息 =====
+ipcMain.handle('get-public-details', async (event, seriesId, vid) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
+  return fetchPublicDetails(seriesId, vid);
+});
+
 ipcMain.handle('get-app-info', async () => ({
   version: APP_VERSION,
   brand: APP_TITLE,
   appName: APP_TITLE,
   platform: process.platform,
+  preview: IS_PREVIEW,
 }));
 
 // 打开外部链接（保留给需要时调用）
@@ -2984,12 +3006,23 @@ ipcMain.handle('open-external-url', async (event, url) => {
 let windowLayout = 'landscape';
 let landscapeBounds = null;
 let layoutChanging = false;
+const stealth = createStealthController({ screen, getWindow: () => mainWindow });
+ipcMain.handle('set-stealth-mode', async (event, enabled) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || typeof enabled !== 'boolean') return { success: false, error: '无法切换小窗' };
+  if (enabled && (mainWindow.isFullScreen() || layoutChanging)) return { success: false, error: '请先退出全屏，再开启隐身小窗' };
+  try {
+    episodePanel.close();
+    stealth.setEnabled(enabled);
+    return { success: true };
+  } catch (error) { return { success: false, error: error.message }; }
+});
 const episodePanel = createEpisodePanelController({ ipcMain, screen, getMainWindow: () => mainWindow, getLayout: () => windowLayout });
 ipcMain.handle('get-window-layout', () => windowLayout);
 ipcMain.handle('set-window-layout', async (event, mode) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || !['portrait', 'landscape'].includes(mode)) {
     return { success: false, error: '无法切换窗口布局' };
   }
+  if (stealth.enabled) return { success: false, error: '请先退出隐身小窗' };
   if (layoutChanging) return { success: false, error: '窗口正在切换，请稍后重试' };
   if (mode === windowLayout) return { success: true, mode };
   layoutChanging = true;
@@ -3057,6 +3090,8 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    stealth.dispose();
+    mediaAccess.clear();
     clearOnlineCache();
     for (const job of compatPreparing.values()) { job.cancelled = true; job.controller.abort(); }
     mainWindow = null;
@@ -3088,6 +3123,7 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', () => {
+    stealth.setEnabled(false);
     // 搜索窗口可能仍在后台，不能用所有窗口数量判断主窗口是否存在。
     if (!mainWindow || mainWindow.isDestroyed()) createWindow();
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -3123,6 +3159,7 @@ app.whenReady().then(async () => {
         { role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭窗口' },
         { type: 'separator' },
         { label: '回到主窗口', accelerator: 'CmdOrCtrl+1', click: () => app.emit('activate') },
+        { label: '退出隐身小窗', click: () => stealth.setEnabled(false) },
       ] },
     ]));
   }

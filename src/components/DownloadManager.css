@@ -54,23 +54,23 @@
   margin: -8px 0 16px;
   padding: 9px 13px;
   border-radius: var(--radius);
-  background: rgba(255, 77, 109, 0.08);
-  border: 1px solid rgba(255, 77, 109, 0.22);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
   color: var(--text-secondary);
   font-size: 13px;
 }
 
 /* 一键暂停：实心警示色，和主色按钮区分开 */
 .btn-danger-solid {
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
   color: #fff;
   font-weight: 600;
 }
 
 .btn-danger-solid:hover:not(:disabled) {
-  background: #dc2626;
-  border-color: #dc2626;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 
 /* 并发运行状态条 */
@@ -156,18 +156,18 @@
 }
 
 .merge-running {
-  border-color: #dfaaa6;
+  border-color: var(--accent-border);
   background: var(--accent-soft);
 }
 
 .merge-completed {
-  border-color: rgba(0, 180, 42, 0.35);
-  background: rgba(0, 180, 42, 0.06);
+  border-color: var(--success-border);
+  background: var(--success-bg);
 }
 
 .merge-failed {
-  border-color: rgba(245, 63, 63, 0.35);
-  background: rgba(245, 63, 63, 0.06);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
 }
 
 .merge-body {
@@ -266,8 +266,8 @@
   animation: dm-toast-in 0.22s ease-out;
 }
 
-.dm-toast-success { background: var(--success); }
-.dm-toast-error { background: var(--danger); }
+.dm-toast-success { background: var(--success-fill); }
+.dm-toast-error { background: var(--danger-fill); }
 
 @keyframes dm-toast-in {
   from { opacity: 0; transform: translateY(10px); }
@@ -307,7 +307,7 @@
 
 .dm-task.selected {
   border-color: var(--accent);
-  background: var(--accent-soft, rgba(255, 77, 109, 0.06));
+  background: var(--accent-soft);
 }
 
 .dm-task-cover {
@@ -365,8 +365,8 @@
 
 .status-pending { background: var(--bg-inset); color: var(--text-secondary); }
 .status-downloading { background: var(--accent-soft); color: var(--accent); }
-.status-completed { background: rgba(0, 180, 42, 0.12); color: var(--success); }
-.status-failed { background: rgba(245, 63, 63, 0.12); color: var(--danger); }
+.status-completed { background: var(--success-bg); color: var(--success); }
+.status-failed { background: var(--danger-bg); color: var(--danger); }
 .status-stopped { background: var(--bg-inset); color: var(--text-tertiary); }
 
 .dm-size { font-variant-numeric: tabular-nums; }
@@ -427,7 +427,7 @@
 }
 
 .icon-btn-danger:hover {
-  background: rgba(245, 63, 63, 0.12);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
@@ -448,7 +448,7 @@
 .dm-queue-bar, .dm-hint { margin: 16px 0; }
 .dm-list { gap: 0; }
 .dm-task { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 16px 4px; background: transparent; }
-.dm-task:hover { box-shadow: none; background: #f3f0ec; }
+.dm-task:hover { box-shadow: none; background: var(--bg-hover); }
 .dm-task.selected { background: var(--accent-soft); }
 .dm-task-select { width: 15px; height: 15px; accent-color: var(--accent); flex-shrink: 0; margin-left: 8px; }
 .dm-task-cover { width: 40px; height: 54px; border-radius: 6px; }

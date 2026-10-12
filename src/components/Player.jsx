@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
 import PlayerControls from './PlayerControls';
+import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
+import CommunityPanel from './CommunityPanel';
+import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
 
@@ -13,6 +16,9 @@ import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown,
  *  - 断点续播：按 series_id 记住看到第几集、第几秒
  */
 function Player({ target, onNavigate, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
+  const enhancement = useVideoEnhancement();
+  const [shortcuts, setShortcuts] = useState(readShortcuts);
+  useEffect(() => subscribeShortcuts(setShortcuts), []);
   const [portraitActionsOpen, setPortraitActionsOpen] = useState(false);
   const [windowFill, setWindowFill] = useState(false);
   useEffect(() => { if (!portrait || !active) setWindowFill(false); }, [portrait, active]);
@@ -656,47 +662,58 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
   };
 
+  const toggleFullscreen = useCallback(async () => {
+    if (document.querySelector('.stealth-mode')) { showToast('请先退出隐身小窗'); return; }
+    try {
+      if (portrait) { setWindowFill(fill => !fill); return; }
+      if (document.fullscreenElement === stageRef.current) await document.exitFullscreen();
+      else await stageRef.current?.requestFullscreen();
+    } catch { showToast('无法进入或退出全屏，请重试'); }
+  }, [portrait, showToast]);
+
   // Capture handled keys before media controls; cancel keyup too so focused buttons cannot toggle twice.
   useEffect(() => {
     if (!active || confirmAsk || mergeAsk || pickerOpen) return;
     const held = new Set();
-    const keyName = event => event.code === 'Space' || event.key === ' ' ? 'space' : String(event.key || '').toLowerCase();
     const onKey = (event) => {
       const video = videoRef.current;
-      if (!video || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.isComposing) return;
-      const target = event.target;
-      if (target?.isContentEditable || target?.closest?.('input, select, textarea, [contenteditable]:not([contenteditable="false"]), [data-player-menu], [role="menu"], [role="menuitem"], [role="menuitemradio"], [role="listbox"]')) return;
-      if (target?.closest?.('button, a') && !target.closest('.player-container')) return;
-      const key = keyName(event);
-      if (!['space', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 's', 'd'].includes(key)) return;
+      if (!video || event.defaultPrevented || ignoresPlaybackShortcut(event.target)) return;
+      const key = shortcutKey(event);
+      const action = SHORTCUT_ACTIONS.find(item => shortcuts[item.id] === key);
+      if (!action) return;
       event.preventDefault(); event.stopPropagation?.();
-      held.add(key);
-      if (event.repeat && ['space', 'arrowup', 'arrowdown', 'a'].includes(key)) return;
+      held.add(event.code || event.key);
+      if (event.repeat && !action.repeat) return;
       const { currentIndex: index, autoNext: nextEnabled } = stateRef.current;
-      if (key === 'space') {
+      if (action.id === 'play') {
         if (video.paused) video.play().catch(() => showToast('暂时无法播放，请重试本集'));
         else video.pause();
-      } else if (key === 'arrowright' || key === 'arrowleft') {
+      } else if (action.id === 'forward' || action.id === 'backward') {
         const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
-        video.currentTime = Math.max(0, Math.min(limit, video.currentTime + (key === 'arrowright' ? 5 : -5)));
-      } else if (key === 'arrowup' || key === 'arrowdown') {
-        const episode = key === 'arrowup' ? findPrev(index) : findNext(index);
-        if (episode) goToEpisode(episode.vid_index);
-        else showToast(key === 'arrowup' ? '已经是第一集' : '已经是最后一集');
-      } else if (key === 'a') setAutoNext(!nextEnabled);
-      else changePlaybackRate(playbackRateRef.current + (key === 's' ? -0.25 : 0.25));
+        try { video.currentTime = Math.max(0, Math.min(limit, video.currentTime + (action.id === 'forward' ? 5 : -5))); }
+        catch { showToast('暂时无法跳转，请稍后重试'); }
+      } else if (action.id === 'previous' || action.id === 'next') {
+        const episode = action.id === 'previous' ? findPrev(index) : findNext(index);
+        if (episode) { goToEpisode(episode.vid_index); setAutoAdvancing(true); }
+        else showToast(action.id === 'previous' ? '已经是第一集' : '已经是最后一集');
+      } else if (action.id === 'autoNext') setAutoNext(!nextEnabled);
+      else if (action.id === 'fullscreen') toggleFullscreen();
+      else changePlaybackRate(playbackRateRef.current + (action.id === 'slower' ? -0.25 : 0.25));
     };
     const onKeyUp = event => {
-      if (!held.delete(keyName(event))) return;
+      if (!held.delete(event.code || event.key)) return;
       event.preventDefault(); event.stopPropagation?.();
     };
+    const onBlur = () => held.clear();
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
     };
-  }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast]);
+  }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast, shortcuts, toggleFullscreen]);
 
   const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false) => {
     persistPosition(true);
@@ -938,7 +955,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             aria-pressed={autoNext}
             className={`btn btn-outline ${autoNext ? 'btn-autonext-on' : ''}`}
             onClick={() => setAutoNext(!autoNext)}
-            title="播完自动播放下一集（快捷键 A）"
+            title={`播完自动播放下一集（${formatShortcut(shortcuts.autoNext)}）`}
           >
             <Layers size={15} />
             连播 {autoNext ? '开' : '关'}
@@ -1163,11 +1180,12 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}>
           <video
             ref={videoRef}
+            crossOrigin="anonymous"
             src={videoSrc || undefined}
             className="player-video"
             aria-busy={!canPlay || mediaBuffering}
             tabIndex={0}
-            aria-label="视频画面，空格播放或暂停"
+            aria-label={`视频画面，${formatShortcut(shortcuts.play)}播放或暂停`}
             onClick={() => {
               const video = videoRef.current;
               if (!canPlay || !video) return;
@@ -1210,7 +1228,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               if (failedDecode && autoCompat && !compatUrl && autoCompatAttemptRef.current !== mediaVersion.current) startCompatPlay(currentIndex);
             }}
           />
-        <PlayerControls continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
+        <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
+        <PlayerControls enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
@@ -1380,7 +1399,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       </div>
 
       <div className="player-tips">
-        快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · ↑ ↓ 上一集/下一集 · A 切换连播 · S 减速 / D 加速 0.25 倍（0.25–4 倍）。
+        快捷键：{SHORTCUT_ACTIONS.map(action => `${formatShortcut(shortcuts[action.id])} ${action.label}`).join(' · ')}。可在设置中更改。
         <br />
         <b>未锁定的灰色分集点一下即可在线播放</b>（不保存到下载目录）；双击才加入下载队列。
         连播时遇到未下载的集会自动转在线播放。
@@ -1389,6 +1408,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       </section>
       </div>
 
+      {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} />}
       {toast && <div className="dm-toast dm-toast-success" onClick={() => setToast(null)}>{toast}</div>}
 
       {/* 合并格式选择 */}

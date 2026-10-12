@@ -135,7 +135,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(31, 35, 41, 0.45);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -258,7 +258,7 @@
 
 .proxy-mode-item.active {
   border-color: var(--accent);
-  background: rgba(255, 77, 109, 0.06);
+  background: var(--accent-soft);
 }
 
 .proxy-mode-body {
@@ -325,15 +325,15 @@
 }
 
 .proxy-test-result.ok {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #0f7a5a;
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success);
 }
 
 .proxy-test-result.fail {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #b91c1c;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
 }
 
 .proxy-modal-foot {
@@ -362,3 +362,14 @@
 .proxy-mode-item { padding: 13px; }
 .proxy-switch-row { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .proxy-fields-disabled { opacity: .5; }
+
+.appearance-error { color: var(--danger); font-size: 12px; }
+
+.shortcut-settings-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.shortcut-settings-heading h2 { font-size: 17px; letter-spacing: 0; }
+.shortcut-settings-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; margin: 12px 0; }
+.shortcut-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-muted); }
+.shortcut-record { min-width: 76px; font-variant-numeric: tabular-nums; }
+.shortcut-record.is-recording { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
+.shortcut-error { color: var(--danger); }
+@media (max-width: 620px) { .shortcut-settings-list { grid-template-columns: 1fr; } }

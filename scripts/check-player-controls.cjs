@@ -3,6 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
+const videoEnhancementStub = {
+  __esModule: true, default: () => null, VideoEnhancementControls: () => null,
+  useVideoEnhancement: () => ({ mode: 'original', strength: 50, update() {}, status: {}, setStatus() {} }),
+};
+const shortcutModule = { exports: {} };
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/shortcuts.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code, { module: shortcutModule, exports: shortcutModule.exports });
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/PlayerControls.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 (async () => {
@@ -24,12 +30,22 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   const document = { fullscreenElement: null, addEventListener: (name, fn) => documentListeners.set(name, fn), removeEventListener: name => documentListeners.delete(name), exitFullscreen: async () => { document.fullscreenElement = null; documentListeners.get('fullscreenchange')?.(); } };
   const stage = { addEventListener: (name, fn) => stageListeners.set(name, fn), removeEventListener: name => stageListeners.delete(name), requestFullscreen: async () => { fullscreenCalls++; document.fullscreenElement = stage; documentListeners.get('fullscreenchange')?.(); } };
   const props = { videoRef: { current: media }, stageRef: { current: stage }, source: 'one', available: true, rate: 1, onRateChange: rate => { selectedRate = rate; } };
-  const context = { module: { exports: {} }, document, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : {} };
+  props.onWindowFill = value => { props.windowFill = value; };
+  props.onToggleFullscreen = async () => {
+    if (props.portrait) props.onWindowFill(!props.windowFill);
+    else if (document.fullscreenElement === stage) await document.exitFullscreen();
+    else await stage.requestFullscreen();
+  };
+  const context = { module: { exports: {} }, document, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
   context.exports = context.module.exports; vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const visit = node => { if (!node || typeof node !== 'object') return; out.push(node); node.children?.forEach(visit); }; visit(tree); return out; };
   const find = label => nodes().find(node => node.props['aria-label'] === label);
   const render = () => { do { needsRender = false; cursor = 0; tree = context.module.exports.default(props); for (const node of nodes()) if (node.props.ref) node.props.ref.current = { contains: target => target === node, focus() {}, querySelector: () => keyboardFocus ? {} : null }; effects.splice(0).forEach(fn => fn()); } while (needsRender); };
   render(); render();
+  props.shortcuts = { ...shortcutModule.exports.DEFAULT_SHORTCUTS, play: 'shift+j', fullscreen: 'g' }; render();
+  assert.equal(find('播放').props.title, '播放/暂停（Shift + J）');
+  assert.equal(find('全屏').props.title, '全屏（G）');
+  props.shortcuts = shortcutModule.exports.DEFAULT_SHORTCUTS; render();
   assert.equal(find('播放进度').props.max, 100); assert.equal(find('播放进度').props.value, 12);
   await find('播放').props.onClick(); render(); assert.equal(plays, 1); assert.ok(find('暂停'));
   find('暂停').props.onClick(); render(); assert.equal(pauses, 1);
@@ -50,6 +66,61 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   await find('播放').props.onClick(); render(); advance(); render();
   const hidden = () => tree.props.className.includes('controls-hidden');
   assert.ok(hidden(), 'playing in landscape fullscreen must hide idle controls');
+  const keyTarget = { closest: () => null };
+  const keyboard = (type, key, extra = {}) => {
+    const event = { type, key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, target: keyTarget, defaultPrevented: false, ...extra };
+    windowListeners.get(type)?.(event); render();
+  };
+  for (const custom of [false, true]) {
+    props.shortcuts = { ...shortcutModule.exports.DEFAULT_SHORTCUTS, ...(custom ? { previous: 'shift+j', next: 'shift+k' } : {}) }; render();
+    for (const key of custom ? ['j', 'k'] : ['ArrowUp', 'ArrowDown']) {
+      for (const defaultPrevented of [false, true]) {
+        advance(); render(); assert.ok(hidden());
+        keyboard('keydown', key, { shiftKey: custom, defaultPrevented });
+        assert.ok(hidden(), `${key} keydown preserves hidden controls regardless of parent listener order`);
+        keyboard('keydown', key, { shiftKey: custom, repeat: true, defaultPrevented });
+        assert.ok(hidden(), `${key} repeat must not reveal controls`);
+        props.continuing = true; props.available = false; media.pause(); render();
+        assert.ok(hidden(), `${key} reset and preparation preserve hidden controls`);
+        if (custom) keyboard('keyup', 'Shift');
+        keyboard('keyup', key, { shiftKey: false, defaultPrevented });
+        assert.ok(hidden(), `${key} keyup preserves hidden controls even after Shift is released`);
+        props.source += '-keyboard'; props.available = true; listeners.get('emptied')?.(); render();
+        assert.ok(hidden(), `${key} source replacement preserves hidden controls`);
+        listeners.get('loadedmetadata')?.(); render();
+        assert.ok(hidden(), `${key} metadata preserves hidden controls before playing`);
+        await media.play(); props.continuing = false; render();
+        assert.ok(hidden(), `${key} playing preserves hidden controls`);
+        keyboard('keydown', key, { shiftKey: custom, defaultPrevented });
+        props.continuing = true; props.available = false; media.pause(); render();
+        props.source += '-held'; props.available = true; render();
+        await media.play(); props.continuing = false; render();
+        keyboard('keyup', key, { shiftKey: custom, defaultPrevented });
+        if (custom) keyboard('keyup', 'Shift');
+        assert.ok(hidden(), `${key} release after playing and later Shift release preserve hidden controls`);
+      }
+    }
+  }
+  props.shortcuts = shortcutModule.exports.DEFAULT_SHORTCUTS; render();
+  stageListeners.get('pointermove')(); render();
+  keyboard('keydown', 'ArrowDown'); keyboard('keyup', 'ArrowDown');
+  assert.ok(!hidden(), 'visible controls remain visible after an episode shortcut');
+  advance(); render();
+  keyboard('keydown', 'ArrowDown', { target: { closest: query => query.includes('[data-player-menu]') ? {} : null } });
+  assert.ok(!hidden(), 'menu input navigation still reveals and retains controls');
+  advance(); render();
+  keyboard('keydown', 'ArrowDown', { ctrlKey: true });
+  assert.ok(!hidden(), 'modified system keys keep ordinary reveal behavior');
+  advance(); render();
+  keyboard('keydown', ' '); media.pause(); render();
+  assert.ok(!hidden(), 'intentional keyboard pause reveals controls');
+  await media.play(); render(); advance(); render();
+  keyboard('keydown', 'ArrowDown'); props.continuing = true; props.available = false; media.pause(); render();
+  props.continuing = false; render();
+  assert.ok(!hidden(), 'failed shortcut preparation restores controls');
+  props.available = true; await media.play(); render(); advance(); render();
+  keyboard('keyup', 'ArrowDown');
+
   props.autoContinue = true; render();
   media.ended = true; media.pause(); render();
   assert.ok(hidden(), 'end-of-episode pause before ended must not reveal controls when auto-next is available');
@@ -97,6 +168,8 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     let finishNext;
     const ui = mount({ local, props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'mock:first' } : new Promise(resolve => { finishNext = resolve; }) });
     await ui.flush(); ui.metadata(); await ui.flush();
+    assert.equal(typeof controls(ui).props.onToggleFullscreen, 'function', 'parent supplies the shared fullscreen action');
+    assert.equal(controls(ui).props.shortcuts.play, 'space', 'parent supplies effective shortcut preferences');
     assert.equal(controls(ui).props.autoContinue, true, 'parent marks whether an unlocked next episode can follow');
     ui.find(node => node.type === 'video').props.onEnded(); await ui.flush();
     assert.equal(controls(ui).props.continuing, true, `parent retains auto-next intent through source preparation (local=${local})`);
@@ -107,17 +180,58 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     assert.equal(controls(ui).props.continuing, false, 'playing clears the transition so later manual pause is visible');
     ui.unmount();
   }
-  const failed = mount({ props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'mock:first' } : { success: false, error: 'test preparation failure' } });
-  await failed.flush(); failed.metadata(); await failed.flush();
-  failed.find(node => node.type === 'video').props.onEnded(); await failed.flush();
-  assert.equal(controls(failed).props.continuing, false, 'failed online preparation must restore ordinary pause behavior');
-  failed.unmount();
-  const blocked = mount({ local: true, props: { setEpisodesOpen() {} } });
-  await blocked.flush(); blocked.metadata(); await blocked.flush();
-  blocked.find(node => node.type === 'video').props.onEnded(); await blocked.flush();
-  blocked.media.play = async () => { throw new Error('test autoplay denied'); };
-  blocked.metadata(); await blocked.flush();
-  assert.equal(controls(blocked).props.continuing, false, 'autoplay rejection must leave the play control accessible');
-  blocked.unmount();
-  console.log('PASS video controls: play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
+  for (const local of [true, false]) {
+    for (const custom of [false, true]) {
+      for (const direction of ['previous', 'next']) {
+        let finish;
+        const bindings = { ...shortcutModule.exports.DEFAULT_SHORTCUTS, ...(custom ? { previous: 'shift+j', next: 'shift+k' } : {}) };
+        const storage = new Map([[shortcutModule.exports.SHORTCUT_STORAGE_KEY, JSON.stringify(bindings)]]);
+        const ui = mount({ local, storage, episodeCount: 3, settings: { cache_next_episode: false },
+          props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 2, ts: 1 } },
+          prepare: p => p.vidIndex === 2 ? { success: true, url: 'mock:middle' } : new Promise(resolve => { finish = resolve; }) });
+        await ui.flush(); ui.metadata(); await ui.flush();
+        const key = custom ? (direction === 'previous' ? 'j' : 'k') : (direction === 'previous' ? 'ArrowUp' : 'ArrowDown');
+        const init = { key, code: custom ? `Key${key.toUpperCase()}` : key, shiftKey: custom, target: keyTarget };
+        // Input/menu events must never be redirected to an episode.
+        for (const target of [{ isContentEditable: true }, { closest: query => query.includes('input') ? {} : null }, { closest: query => query.includes('[data-player-menu]') ? {} : null }]) {
+          const event = ui.dispatchKey('keydown', { ...init, target });
+          assert.equal(event.defaultPrevented, false, 'typing and menu navigation are not hijacked');
+          assert.equal(controls(ui).props.continuing, false);
+        }
+        assert.equal(ui.dispatchKey('keydown', init).defaultPrevented, true);
+        await ui.flush();
+        assert.equal(controls(ui).props.continuing, true, `${local ? 'local' : 'online'} ${direction} ${custom ? 'custom' : 'default'} shortcut retains transition intent after reset`);
+        ui.dispatchKey('keyup', { ...init, shiftKey: false });
+        if (!local) { finish({ success: true, url: `mock:${direction}` }); await ui.flush(); }
+        assert.equal(controls(ui).props.continuing, true, 'shortcut transition persists until actual playing');
+        const play = ui.media.play;
+        ui.media.play = async () => { ui.media.paused = false; };
+        ui.metadata(); await ui.flush();
+        assert.equal(controls(ui).props.continuing, true, 'metadata and an accepted play request do not end the transition before playing');
+        ui.media.play = play; await play(); await ui.flush();
+        assert.equal(controls(ui).props.continuing, false, 'actual playing releases shortcut transition state');
+        assert.equal(ui.find(node => node.type === 'video').props.src, local ? `file:///mock-${direction === 'previous' ? 1 : 3}.mp4` : `mock:${direction}`);
+        ui.unmount();
+      }
+    }
+  }
+  for (const trigger of ['ended', 'shortcut']) {
+    const failed = mount({ props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'mock:first' } : { success: false, error: 'test preparation failure' } });
+    await failed.flush(); failed.metadata(); await failed.flush();
+    if (trigger === 'ended') failed.find(node => node.type === 'video').props.onEnded();
+    else failed.dispatchKey('keydown', { key: 'ArrowDown', code: 'ArrowDown', target: keyTarget });
+    await failed.flush();
+    assert.equal(controls(failed).props.continuing, false, 'failed online preparation must restore ordinary pause behavior');
+    failed.unmount();
+    const blocked = mount({ local: true, props: { setEpisodesOpen() {} } });
+    await blocked.flush(); blocked.metadata(); await blocked.flush();
+    if (trigger === 'ended') blocked.find(node => node.type === 'video').props.onEnded();
+    else blocked.dispatchKey('keydown', { key: 'ArrowDown', code: 'ArrowDown', target: keyTarget });
+    await blocked.flush();
+    blocked.media.play = async () => { throw new Error('test autoplay denied'); };
+    blocked.metadata(); await blocked.flush();
+    assert.equal(controls(blocked).props.continuing, false, 'autoplay rejection must leave the play control accessible');
+    blocked.unmount();
+  }
+  console.log('PASS video controls: default/custom previous/next keydown/keyup/reset/preparation/source/metadata/playing, local/online shortcut matrix, input/menu boundaries, play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

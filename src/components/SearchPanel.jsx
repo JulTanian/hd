@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import './HongguoDownload.css';
 import { Search, Film, RefreshCw, ExternalLink } from './icons';
 import { isSubmitKey } from './episodeRange';
+import { readSearchHistory, saveSearchTerm, clearSearchHistory, rememberCatalogTitles, getSearchSuggestions } from '../searchHistory';
 
 const SOURCE_LABELS = { hongguo: '红果短剧', xifan: '西饭短剧', hema: '河马短剧' };
 
@@ -15,6 +16,10 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
   const pendingSearch = useRef(null);
   useEffect(() => () => { requestVersion.current++; }, []);
   const [keyword, setKeyword] = useState('');
+  const [history, setHistory] = useState(readSearchHistory);
+  const [historyError, setHistoryError] = useState('');
+  const inputRef = useRef(null);
+  const suggestions = getSearchSuggestions(keyword, history);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null); // null=未搜索, []=无结果
   const [error, setError] = useState('');
@@ -40,6 +45,26 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     setResults(null);
     setError('');
     setPageTitle('');
+  };
+
+  const changeKeyword = (value) => {
+    requestVersion.current++;
+    pendingSearch.current = null;
+    setKeyword(value);
+    setLoading(false);
+    setPickingId('');
+    setResults(null);
+    setError('');
+  };
+
+  const clearHistory = () => {
+    try {
+      clearSearchHistory();
+      setHistory([]);
+      setHistoryError('');
+    } catch {
+      setHistoryError('搜索历史清除失败，请重试。');
+    }
   };
 
   const doSearch = async () => {
@@ -75,6 +100,15 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
           failures.push(`${SOURCE_LABELS[searchSource]}：${response.reason?.message || '搜索失败'}`);
         }
       });
+      rememberCatalogTitles(merged);
+      if (responses.some((response) => response.status === 'fulfilled')) {
+        try {
+          setHistory(saveSearchTerm(kw));
+          setHistoryError('');
+        } catch {
+          setHistoryError('搜索结果已显示，但本机搜索历史保存失败。');
+        }
+      }
       setResults(merged);
       if (failures.length) setError(`${failures.join('；')}。${merged.length ? '已显示其他来源的结果。' : ''}请重试或切换来源。`);
     } catch (e) {
@@ -127,9 +161,13 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
           type="text"
           className="input-field"
           aria-label="搜索短剧名称"
+          aria-describedby="search-suggestions-hint"
+          ref={inputRef}
+          list="local-search-suggestions"
+          autoComplete="off"
           placeholder="输入剧名，例如：一村人养一个神"
           value={keyword}
-          onChange={(e) => { requestVersion.current++; pendingSearch.current = null; setKeyword(e.target.value); setLoading(false); setPickingId(''); setResults(null); setError(''); }}
+          onChange={(e) => changeKeyword(e.target.value)}
           onKeyDown={(e) => isSubmitKey(e) && doSearch()}
         />
         <button className="btn btn-primary" onClick={doSearch} disabled={loading}>
@@ -146,6 +184,15 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
           )}
         </button>
       </div>
+      <datalist id="local-search-suggestions">
+        {suggestions.map(({ term, source: origin }) => <option key={term} value={term} label={origin} />)}
+      </datalist>
+      <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">本机联想：匹配搜索历史和本次浏览过的真实剧名。</p>
+      {history.length > 0 && <div className="search-history">
+        <div className="search-history-heading"><span>本机搜索历史</span><button type="button" className="btn-chip" onClick={clearHistory}>清除历史</button></div>
+        <div className="search-history-terms">{history.map((term) => <button type="button" className="btn-chip" key={term} title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button>)}</div>
+      </div>}
+      {historyError && <p className="search-history-error" role="alert">{historyError}</p>}
       <p className="settings-hint" style={{ marginTop: 8 }}>
         {source === 'all' ? '同时搜索红果、西饭和河马，结果标明来源；选择一部即可查看全部剧集。' : '按剧名查找，选择一部即可查看全部剧集。'}
       </p>

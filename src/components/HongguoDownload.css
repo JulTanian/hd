@@ -4,7 +4,7 @@
 .hero-text h2 { margin-bottom: 8px; }
 .mode-tabs { display: inline-flex; padding: 4px; gap: 3px; background: var(--bg-inset); border-radius: 9px; margin-bottom: 24px; }
 .mode-tab { border: 0; background: transparent; color: var(--text-secondary); border-radius: 6px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; padding: 7px 15px; }
-.mode-tab.active { background: white; color: var(--text-primary); box-shadow: var(--shadow-sm); font-weight: 600; }
+.mode-tab.active { background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-sm); font-weight: 600; }
 .hongguo-card { padding: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 24px; }
 .card-header-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 16px; }
 .card-header-title svg { color: var(--text-secondary); }
@@ -22,11 +22,11 @@
 .select-buttons, .range-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .divider { height: 16px; width: 1px; margin: 0 5px; background: var(--border); }
 .range-label { font-size: 12px; color: var(--text-secondary); }
-.range-input { width: 142px; height: 32px; border: 1px solid var(--border-strong); border-radius: 6px; background: white; padding: 0 10px; color: var(--text-primary); outline: none; }
+.range-input { width: 142px; height: 32px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-elevated); padding: 0 10px; color: var(--text-primary); outline: none; }
 .episode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 8px; max-height: 460px; overflow: auto; padding: 3px; }
-.episode-card { display: flex; align-items: center; text-align: left; gap: 9px; padding: 11px; border: 1px solid var(--border); background: white; border-radius: 8px; }
+.episode-card { display: flex; align-items: center; text-align: left; gap: 9px; padding: 11px; border: 1px solid var(--border); background: var(--bg-elevated); border-radius: 8px; }
 .episode-card:hover { background: var(--bg-inset); }
-.episode-card.selected { background: var(--accent-soft); border-color: #dfaaa6; }
+.episode-card.selected { background: var(--accent-soft); border-color: var(--accent-border); }
 .checkbox-icon { display: flex; }
 .icon-checked { color: var(--accent); } .icon-unchecked { color: var(--text-tertiary); }
 .episode-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -48,3 +48,11 @@
 .hongguo-container .source-control { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .hongguo-container .source-control select { width: auto; min-width: 112px; }
 .episode-card:disabled { cursor: not-allowed; background: var(--bg-inset); color: var(--text-secondary); }
+
+.search-suggestions-hint { margin-top: 8px; }
+.search-history { margin-top: 16px; }
+.search-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
+.search-history-heading .btn-chip { background: transparent; }
+.search-history-terms { display: flex; flex-wrap: wrap; gap: 6px; }
+.search-history-terms .btn-chip { max-width: min(100%, 260px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-history-error { margin-top: 10px; color: var(--danger); font-size: 12px; }

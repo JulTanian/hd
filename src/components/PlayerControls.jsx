@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause } from './icons';
 import './PlayerControls.css';
+import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, shortcutKey } from '../shortcuts';
+import { VideoEnhancementControls } from './VideoEnhancement';
 
 const formatTime = seconds => {
   const value = Math.max(0, Math.floor(seconds || 0));
@@ -8,16 +10,32 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
+export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuHeight, setMenuHeight] = useState(240);
   const [controlsHidden, setControlsHidden] = useState(false);
   const controlsRef = useRef(null);
   const menuRef = useRef(null);
   const menuButtonRef = useRef(null);
   const speedRef = useRef(null);
+  const episodeKeysRef = useRef(new Set());
   const expanded = fullscreen || windowFill;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const measure = () => {
+      const stage = stageRef.current?.getBoundingClientRect?.();
+      const button = menuButtonRef.current?.getBoundingClientRect?.();
+      if (stage && button) setMenuHeight(Math.max(96, button.top - Math.max(8, stage.top) - 16));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    if (stageRef.current) observer?.observe(stageRef.current);
+    window.addEventListener('resize', measure);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
+  }, [menuOpen, fullscreen, windowFill, stageRef]);
 
   useEffect(() => {
     if (!windowFill) return;
@@ -39,17 +57,30 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
       }
     };
     const reveal = () => { setControlsHidden(false); scheduleHide(); };
+    const onKey = event => {
+      const physicalKey = event.code || event.key;
+      // Keep the release paired across source/effect changes, even if Shift is released first.
+      if (event.type === 'keyup' && episodeKeysRef.current.delete(physicalKey)) return;
+      if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return;
+      const key = shortcutKey(event);
+      if (!menuOpen && !ignoresPlaybackShortcut(event.target) && key && [shortcuts.previous, shortcuts.next].includes(key)) {
+        if (event.type === 'keydown') episodeKeysRef.current.add(physicalKey);
+        return;
+      }
+      reveal();
+    };
     const startDrag = event => { if (event.target.closest('input[type="range"]')) { dragging = true; reveal(); } };
     const stopDrag = () => { if (dragging) { dragging = false; reveal(); } };
     stage?.addEventListener('pointermove', reveal);
     stage?.addEventListener('pointerdown', startDrag);
     stage?.addEventListener('focusin', reveal);
     stage?.addEventListener('focusout', reveal);
-    window.addEventListener('keydown', reveal, true);
-    window.addEventListener('keyup', reveal, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKey, true);
     window.addEventListener('pointerup', stopDrag);
     window.addEventListener('pointercancel', stopDrag);
-    window.addEventListener('blur', stopDrag);
+    const onBlur = () => { episodeKeysRef.current.clear(); stopDrag(); };
+    window.addEventListener('blur', onBlur);
     // Source changes and automatic handoffs are not user activity.
     if (!(portrait || expanded) || menuOpen || (!continuing && (!available || (media.paused && !(media.ended && autoContinue))))) reveal();
     else scheduleHide();
@@ -59,13 +90,13 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
       stage?.removeEventListener('pointerdown', startDrag);
       stage?.removeEventListener('focusin', reveal);
       stage?.removeEventListener('focusout', reveal);
-      window.removeEventListener('keydown', reveal, true);
-      window.removeEventListener('keyup', reveal, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKey, true);
       window.removeEventListener('pointerup', stopDrag);
       window.removeEventListener('pointercancel', stopDrag);
-      window.removeEventListener('blur', stopDrag);
+      window.removeEventListener('blur', onBlur);
     };
-  }, [portrait, expanded, available, media.paused, media.ended, continuing, autoContinue, menuOpen, source, stageRef]);
+  }, [portrait, expanded, available, media.paused, media.ended, continuing, autoContinue, menuOpen, source, stageRef, shortcuts]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -118,19 +149,12 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
     video.volume = Number(event.target.value);
     video.muted = video.volume === 0;
   };
-  const toggleFullscreen = async () => {
-    try {
-      if (portrait) { onWindowFill(!windowFill); return; }
-      if (document.fullscreenElement === stageRef.current) await document.exitFullscreen();
-      else await stageRef.current.requestFullscreen();
-    } catch { onError?.('无法进入或退出全屏，请重试'); }
-  };
 
   return (
     <div ref={controlsRef} className={`player-controls ${controlsHidden ? 'controls-hidden' : ''}`} role="group" aria-label="视频播放控制">
       <input className="player-controls-seek" type="range" aria-label="播放进度" aria-valuetext={`${formatTime(media.time)} / ${formatTime(media.duration)}`} min="0" max={media.duration || 0} step="0.1" value={Math.min(media.time, media.duration)} disabled={!available || !media.duration} onChange={seek} />
       <div className="player-controls-row">
-        <button type="button" data-player-control aria-label={media.paused ? '播放' : '暂停'} title="播放/暂停（空格）" disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
+        <button type="button" data-player-control aria-label={media.paused ? '播放' : '暂停'} title={`播放/暂停（${formatShortcut(shortcuts.play)}）`} disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
         <span className="player-controls-time">{formatTime(media.time)} / {formatTime(media.duration)}</span>
         <div className="player-controls-volume">
           <button type="button" data-player-control aria-label={media.muted ? '取消静音' : '静音'} onClick={() => { const video = videoRef.current; if (video) video.muted = !video.muted; }}>
@@ -138,7 +162,7 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
           </button>
           <input type="range" aria-label="音量" aria-valuetext={`${Math.round((media.muted ? 0 : media.volume) * 100)}%`} min="0" max="1" step="0.05" value={media.muted ? 0 : media.volume} onChange={changeVolume} />
         </div>
-        <button type="button" data-player-control aria-label={expanded ? '退出全屏' : '全屏'} title={expanded ? '退出全屏' : portrait ? '填满当前窗口' : '全屏'} onClick={toggleFullscreen}>
+        <button type="button" data-player-control aria-label={expanded ? '退出全屏' : '全屏'} title={`${expanded ? '退出全屏' : portrait ? '填满当前窗口' : '全屏'}（${formatShortcut(shortcuts.fullscreen)}）`} onClick={onToggleFullscreen}>
           <Icon><path d={expanded ? 'M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6'} /></Icon>
         </button>
         <button type="button" data-player-control className="player-controls-rate" aria-label="增加播放速度" title={`播放速度 ${rate}×，点击增加 0.25 倍，4 倍后回到 1 倍`} onClick={() => onRateChange(rate >= 4 ? 1 : Math.min(4, rate + 0.25))}>{rate}×</button>
@@ -146,7 +170,7 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
           <button type="button" ref={menuButtonRef} aria-label="更多播放选项" title="更多播放选项" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
             <Icon><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></Icon>
           </button>
-          {menuOpen && <div className="player-controls-menu" role="dialog" aria-label="播放选项">
+          {menuOpen && <div className="player-controls-menu" style={{ maxHeight: menuHeight }} role="dialog" aria-label="播放选项">
             <label>播放速度<select ref={speedRef} aria-label="播放速度" value={rate} onChange={event => onRateChange(Number(event.target.value))}>
               {Array.from({ length: 16 }, (_, index) => (index + 1) / 4).map(value => <option key={value} value={value}>{value}×</option>)}
             </select></label>
@@ -155,10 +179,8 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
               <option value="width">保持宽度</option>
             </select></label>
             <span id="picture-mode-hint">{pictureMode === 'width' ? '按宽度显示，上下可能裁剪。按剧单独记忆。' : '完整显示，随窗口缩放。按剧单独记忆。'}</span>
-            <span>空格：播放 / 暂停</span>
-            <span>← 快退 5 秒 · → 快进 5 秒</span>
-            <span>↑ 上一集 · ↓ 下一集</span>
-            <span>S 减速 · D 加速，每次 0.25 倍</span>
+            {enhancement && <VideoEnhancementControls enhancement={enhancement} available={available} />}
+            {SHORTCUT_ACTIONS.map(action => <span key={action.id}>{formatShortcut(shortcuts[action.id])}：{action.label}</span>)}
           </div>}
         </div>
       </div>

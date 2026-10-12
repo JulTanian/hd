@@ -8,6 +8,17 @@ const CACHE_MS = 30000;
 const cache = new Map();
 const pending = new Map();
 
+function publicMetadata(item) {
+  const episode_label = typeof item?.episode_right_text === 'string' ? item.episode_right_text.trim().slice(0, 80) : '';
+  const completion_status = /^(?:全\s*\d+\s*集|已完结|完结)$/.test(episode_label) ? 'completed'
+    : /连载|更新至\s*\d+\s*集/.test(episode_label) ? 'ongoing' : 'unknown';
+  const raw = Number(item?.first_visible_time);
+  const timestamp = raw < 1e12 ? raw * 1000 : raw;
+  // create_time is not an established release date, and numeric series_status has no verified mapping.
+  const published_at = Number.isFinite(timestamp) && timestamp > 0 && timestamp <= Date.now() ? timestamp : null;
+  return { episode_label, completion_status, published_at };
+}
+
 // Read only the JSON assignment; never execute scripts received from the website.
 function readRouterData(html) {
   const match = String(html).match(/(?:window\.)?_ROUTER_DATA\s*=\s*(\{)/);
@@ -47,6 +58,7 @@ function parseCatalog(html, category, page, sourceUrl) {
     series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
     episode_count: Number(item.episode_cnt) || 0,
     tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+    ...publicMetadata(item),
     url: `${SITE}/detail?series_id=${item.series_id}`,
   }));
   const genres = (Array.isArray(data.selectorList) ? data.selectorList : []).flatMap(row => Array.isArray(row?.items) ? row.items : [])
@@ -93,6 +105,7 @@ function parseRanking(html, category, page, sourceUrl) {
       episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
+      ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${id}` };
   };
   let results = data?.isSuccess !== false && Array.isArray(data?.rankList) ? data.rankList.map(normalize).filter(Boolean) : [];
@@ -163,4 +176,4 @@ async function browseList(options = {}) {
   return task;
 }
 
-module.exports = { browseList };
+module.exports = { browseList, readRouterData, publicMetadata };

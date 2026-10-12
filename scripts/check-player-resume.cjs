@@ -4,9 +4,15 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const { transformSync } = require('esbuild');
+const videoEnhancementStub = {
+  __esModule: true, default: () => null, VideoEnhancementControls: () => null,
+  useVideoEnhancement: () => ({ mode: 'original', strength: 50, update() {}, status: {}, setStatus() {} }),
+};
+const shortcutSource = transformSync(fs.readFileSync(path.join(__dirname, '../src/shortcuts.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code;
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [] } = {}) {
+  props = { setEpisodesOpen() {}, ...props };
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
   const releases = [], settingsSaved = [];
   const events = new Map(), mediaEvents = new Map(), timers = new Map();
@@ -28,7 +34,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const changed = (old, deps) => !old || deps.some((d, i) => !Object.is(d, old[i]));
   const react = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
-    useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], v => { slots[i] = typeof v === 'function' ? v(slots[i]) : v; }]; },
+    useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], v => { slots[i] = typeof v === 'function' ? v(slots[i]) : v; }]; },
     useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
     useMemo: (fn, deps) => { const i = cursor++; if (!slots[i] || changed(slots[i].deps, deps)) slots[i] = { deps, value: fn() }; return slots[i].value; },
     useCallback: (fn, deps) => react.useMemo(fn, deps),
@@ -55,9 +61,12 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   };
   const window = { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }, electronAPI: new Proxy(api, { get: (o, k) => o[k] || (k.startsWith('on') ? () => () => {} : async () => ({})) }),
     addEventListener: (k, f, options) => { events.set(k, f); listenerOptions.set(k, options); },
-    removeEventListener: k => { events.delete(k); listenerOptions.delete(k); } };
+    removeEventListener: k => { events.delete(k); listenerOptions.delete(k); },
+    dispatchEvent: event => { events.get(event.type)?.(event); return !event.defaultPrevented; } };
+  const shortcutModule = { exports: {} };
+  vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };

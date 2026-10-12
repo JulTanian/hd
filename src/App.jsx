@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Film, Download, Settings, Play, Home, Search, Clock } from './components/icons';
 import HongguoDownload from './components/HongguoDownload';
 import DownloadManager from './components/DownloadManager';
@@ -7,18 +7,27 @@ import Player from './components/Player';
 import Browse from './components/Browse';
 import PageMenu from './components/PageMenu';
 import WatchHistory from './components/WatchHistory';
+import { initializeTheme } from './theme';
+import useStealthWindow from './components/useStealthWindow';
+import './components/StealthWindow.css';
 import AppUpdateNotice from './components/AppUpdateNotice';
+import DramaFeed from './components/DramaFeed';
+import ReleaseCalendar from './components/ReleaseCalendar';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
+  { id: 'feed', label: '热播刷剧', icon: Film },
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
+  { id: 'calendar', label: '收藏与上新', icon: Clock },
   { id: 'manager', label: '下载管理', icon: Download },
   { id: 'settings', label: '设置', icon: Settings },
 ];
 
 export default function App() {
+  const { stealthMode, toggleStealth, stealthError } = useStealthWindow();
+  useLayoutEffect(() => initializeTheme(), []);
   const [layout, setLayout] = useState('landscape');
   const [layoutBusy, setLayoutBusy] = useState(false);
   const [actionsHidden, setActionsHidden] = useState(false);
@@ -66,13 +75,24 @@ export default function App() {
       case 'browse':
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
-        return <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onNavigate={navigate} />;
+        return page === 'feed' ? null : <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onNavigate={navigate} />;
+      case 'feed':
+        return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
+      case 'calendar':
+        return <ReleaseCalendar onPlay={async ({ seriesId }) => {
+          try {
+            const result = await window.electronAPI.searchResolve(seriesId);
+            if (!result?.success) throw new Error(result?.error || '加载剧集失败，请重试');
+            setPlayerTarget({ seriesId, ts: Date.now() });
+            navigate('player');
+          } catch (error) { setStorageError(error.message); }
+        }} />;
       case 'history':
         return <WatchHistory active={page === id} onNavigate={navigate} />;
       case 'manager':
         return <DownloadManager active={page === id} onNavigate={navigate} />;
       case 'settings':
-        return <SettingsPage active={page === id} />;
+        return <SettingsPage active={page === id} preview={appInfo?.preview} />;
       case 'download':
       default:
         return <HongguoDownload active={page === id} onNavigate={navigate} />;
@@ -101,12 +121,12 @@ export default function App() {
   const currentPage = MENU.find((item) => item.id === page);
 
   return (
-    <div className={`app-layout ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
+    <div className={`app-layout ${stealthMode ? 'stealth-mode' : ''} ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
       <aside className="sidebar" aria-label="主导航">
         <div className="sidebar-window-drag" aria-hidden="true" />
         <div className="sidebar-brand">
           <div className="logo"><Play size={21} /></div>
-          <div><div className="brand-text">红果短剧</div><div className="brand-sub">每一集，都值得期待</div></div>
+          <div><div className="brand-text">{appInfo?.appName || '红果短剧'}</div><div className="brand-sub">{appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待'}</div></div>
         </div>
         <nav className="sidebar-menu">
           <div className="sidebar-group-label">内容</div>
@@ -125,7 +145,7 @@ export default function App() {
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>设置</span>
           </button>
-          <div className="footer-note"><span>红果短剧</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
+          <div className="footer-note"><span>{appInfo?.preview ? '功能预览' : '红果短剧'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
         </div>
       </aside>
       <div className="main-wrapper">
@@ -133,7 +153,8 @@ export default function App() {
           <span className="toolbar-location">{currentPage?.label}</span>
           {page === 'player' && layout === 'portrait' && <PageMenu items={MENU} page={page} onNavigate={navigate} />}
           <div className="toolbar-actions">
-            <span className="toolbar-caption">红果短剧</span>
+            <span className="toolbar-caption">{appInfo?.preview ? '功能预览' : '红果短剧'}</span>
+            {page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title="鼠标移开时暂停隐藏，移回继续；Esc 退出">隐身小窗</button>}
             {page === 'player' && layout === 'portrait' && <button className="btn btn-outline btn-sm portrait-episodes-toggle" aria-expanded={episodesOpen}
               aria-controls="player-episode-panel" onClick={() => setEpisodesOpen(open => !open)}>{episodesOpen ? '收起选集' : '选集'}</button>}
             {page === 'player' && <button className="btn btn-outline btn-sm player-actions-toggle" aria-pressed={actionsHidden || borderless && layout === 'portrait'}
@@ -169,7 +190,9 @@ export default function App() {
               onClick={() => navigate(item.id)} title={item.label}><Icon size={18} /><span>{item.label}</span></button>;
           })}
         </nav>
-        <AppUpdateNotice />
+        {!appInfo?.preview && <AppUpdateNotice />}
+        {stealthMode && <div className="stealth-toolbar"><span>移开暂停隐藏 · 移回继续</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>退出小窗</button></div>}
+        {stealthError && <div className="app-storage-error" role="alert">{stealthError}</div>}
         {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>

@@ -3,6 +3,7 @@ import useDialogKeyboard from './useDialogKeyboard';
 import './Browse.css';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
+import { rememberCatalogTitles } from '../searchHistory';
 
 const pageCache = new Map();
 const PAGE_CACHE_TTL_MS = 60_000;
@@ -23,6 +24,7 @@ function Browse({ onNavigate, active = true }) {
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
   const [page, setPage] = useState(1);
+  const [completion, setCompletion] = useState('all');
 
   const [results, setResults] = useState([]);
   const [meta, setMeta] = useState({ total: 0, totalPages: 0, genres: [] });
@@ -137,6 +139,7 @@ function Browse({ onNavigate, active = true }) {
           sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
         };
+        rememberCatalogTitles(next.results);
         setResults(next.results);
         setMeta(next.meta);
         setSourceUrl(next.sourceUrl);
@@ -322,6 +325,7 @@ function Browse({ onNavigate, active = true }) {
 
   useDialogKeyboard(active && (!!detail || detailLoading), closeDetail, '.browse-drawer');
 
+  const visibleResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
   const totalPages = meta.totalPages || 0;
   const pageNumbers = useMemo(() => {
     if (!totalPages) return [];
@@ -396,6 +400,18 @@ function Browse({ onNavigate, active = true }) {
         </div>
       )}
 
+      <div className="browse-completion-filter">
+        <label htmlFor="browse-completion">剧集状态</label>
+        <select id="browse-completion" className="input-field" value={completion} onChange={(event) => setCompletion(event.target.value)} aria-describedby="browse-completion-hint">
+          <option value="all">全部</option>
+          <option value="completed">已完结</option>
+          <option value="ongoing">更新中</option>
+        </select>
+        <span id="browse-completion-hint">仅筛选当前页；状态未注明的剧集只在“全部”显示。</span>
+        {completion !== 'all' && <span role="status">本页 {visibleResults.length} / {results.length} 部</span>}
+      </div>
+      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status"><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></div>}
+
       {error && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{unsupported ? '这里是图文漫画' : '暂时没能加载剧集'}</h3><p>{error}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>查看漫剧</button> : <button className="btn btn-primary" onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />重新加载</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>按剧名搜索</button></div></div>}
 
       {loading && results.length > 0 && <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>正在更新片单，仍可浏览上次结果…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div>}
@@ -404,7 +420,7 @@ function Browse({ onNavigate, active = true }) {
         <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>正在加载{categories.find((item) => item.slug === category)?.label || '短剧'}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div><div className="poster-skeletons" aria-hidden="true">{Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>)}</div></div>
       ) : (
         <div className="browse-grid">
-          {results.map((item) => {
+          {visibleResults.map((item) => {
             const dl = downloadedMap[String(item.series_id)];
             return (
               <button
@@ -421,8 +437,8 @@ function Browse({ onNavigate, active = true }) {
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}
-                  {item.episode_count > 0 && (
-                    <span className="browse-ep-badge">全{item.episode_count}集</span>
+                  {(item.episode_label || item.episode_count > 0) && (
+                    <span className="browse-ep-badge">{item.episode_label || `${item.episode_count} 集`}</span>
                   )}
                   {dl && dl.completed > 0 && (
                     <span className="browse-dl-badge">
@@ -436,6 +452,8 @@ function Browse({ onNavigate, active = true }) {
                   </div>
                 </div>
                 <div className="browse-card-title">{item.series_title}</div>
+                {item.completion_status === 'completed' && <div className="browse-completion-label">已完结</div>}
+                {item.completion_status === 'ongoing' && <div className="browse-completion-label">更新中</div>}
                 {item.heat && <div className="browse-card-heat">{item.heat}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">

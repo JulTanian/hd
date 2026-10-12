@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
 import './Settings.css';
+import AppearanceSettings from './AppearanceSettings';
+import ShortcutSettings from './ShortcutSettings';
 import { Settings, Folder, Check, Globe, X, RefreshCw, AlertCircle } from './icons';
 
 
@@ -41,7 +43,7 @@ function describeProxy(settings) {
   return { on: true, text: '跟随系统 / 环境变量代理' };
 }
 
-function SettingsPage({ active = true }) {
+function SettingsPage({ active = true, preview = false }) {
   const [settings, setSettings] = useState(null);
   const [saved, setSaved] = useState(false);
   const [proxyOpen, setProxyOpen] = useState(false);
@@ -176,6 +178,9 @@ function SettingsPage({ active = true }) {
         <div><h2>设置</h2><p className="page-description">让下载、保存和网络连接，按你的习惯运行。</p></div>
       </div>
 
+      <section className="settings-card" aria-label="外观设置"><AppearanceSettings /></section>
+      <ShortcutSettings active={active} />
+      <p className="settings-hint">播放页顶部可开启隐身小窗。鼠标移开时暂停隐藏，移回继续；Esc 或 Dock 可恢复主窗口。</p>
       <fieldset className="settings-card" disabled={saving}>
         <div className="settings-group">
           <label className="settings-label">下载目录</label>
@@ -264,10 +269,17 @@ function SettingsPage({ active = true }) {
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">发送系统通知<em>默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点</em></span></label>
         </div>
 
+        {preview ? <>
+        <div className="settings-group">
+          <span className="settings-label">独立预览</span>
+          <p className="settings-hint">预览数据独立保存，不接收正式版更新，不会覆盖已安装的红果短剧。</p>
+        </div>
+        </> : <>
         <div className="settings-group">
           <span className="settings-label">检测更新</span>
           <label className="proxy-switch-row"><input type="checkbox" aria-label="自动检测更新" checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">自动检测更新<em>启动时及运行期间每 6 小时检查 GitHub 正式新版。保存后生效；提醒可关闭，不影响使用旧版，不会自动下载安装。</em></span></label>
         </div>
+        </>}
 
         <div className="settings-footer">
           {dirty && <span className="settings-hint" role="status">有未保存的修改</span>}

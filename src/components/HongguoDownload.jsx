@@ -246,6 +246,17 @@ function HongguoDownload({ onNavigate, active = true }) {
               onChange={(e) => { resolveRequest.current++; pendingResolve.current = null; setLoading(false); setInputUrl(e.target.value); }}
               onKeyDown={(e) => isSubmitKey(e) && handleResolve()}
             />
+            <button className="btn btn-outline" disabled={loading} onClick={async () => {
+              try {
+                const text = (await navigator.clipboard.readText()).trim();
+                if (!text || text.length > 4096) throw new Error('剪贴板为空或内容过长，请手动粘贴短剧链接');
+                resolveRequest.current++;
+                pendingResolve.current = null;
+                setInputUrl(text);
+                setErrorMsg('');
+                setSuccessMsg('已粘贴，请确认链接后获取剧集');
+              } catch (error) { setErrorMsg(error.message || '读取剪贴板失败，请手动粘贴'); }
+            }}>粘贴链接</button>
             <button className="btn btn-primary" onClick={handleResolve} disabled={loading}>
               {loading ? (
                 <>
