@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-**1.2 正式版已发布**，支持 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。
+**1.2.1 正式版已发布**，支持 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。
 
-[下载 1.2 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2) · [观看功能介绍](#12-功能介绍视频)
+[下载 1.2.1 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2.1) · [观看功能介绍](#12-功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 
 约 1 分 42 秒，介绍画面缩放、窗口置顶、搜索下载与更新提醒。
 
-[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2)
+[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.2.1)
 
 分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
@@ -58,7 +58,7 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 3. 在「发现短剧」浏览，或在「搜索与下载」输入剧名；打开详情点「立即播放」，也可选择集数加入下载队列。
 4. 下次从「我的剧库」或「观看记录」继续；下载进度、重试和整剧导出在「下载管理」。
 
-**Mac 1.2 包已完成 Developer ID 签名、Apple 公证和票据装订**，包括应用与 DMG。公证不代表 App Store 审核或内容授权。**Windows EXE 未签名**，可能出现系统安全提示；首次启动会展开临时运行文件，设置和观看记录仍保存在用户资料目录。
+**Mac 1.2.1 包已完成 Developer ID 签名、Apple 公证和票据装订**，包括应用与 DMG。公证不代表 App Store 审核或内容授权。**Windows EXE 未签名**，可能出现系统安全提示；首次启动会展开临时运行文件，设置和观看记录仍保存在用户资料目录。
 
 发行附件提供应用对应源码、各平台 FFmpeg/x264 对应源码和 `SHA256SUMS.txt`。不要把 GitHub 自动生成的 Source code ZIP 当成可直接运行的软件。
 
@@ -87,6 +87,7 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 
 - **本地优先**：已下载分集直接播放本地文件，未下载且未锁定分集尝试在线播放；双击未下载分集可加入下载队列。
 - **基本控制**：点击画面或按钮播放 / 暂停，拖动进度条，查看时间，调整音量与静音。
+- **缓存下一集**：在「我的剧库」连播按钮左侧开关，默认开启并记住选择；当前集开始播放就预缓存下一可播放集，切集后继续缓存后一集。已下载或锁定分集不重复缓存；会提前使用网络流量，关闭开关可取消后台预缓存。
 - **自动连播**：默认开启，可随时关闭；自动切换下一集，跳过锁定分集，本地与在线分集可衔接播放。
 - **断点续播**：按剧保存集数和播放位置，从剧库或观看记录接着看；切换到应用内其他页面，仍可继续播放并保存进度。
 - **0.25×–4× 倍速**：共 16 档。右下角倍速数字是独立按钮，每点增加 0.25×，4× 后回到 1×；三点菜单可直接选档，切集与连播保持当前倍速。

@@ -6,8 +6,9 @@ const path = require('node:path');
 const { transformSync } = require('esbuild');
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
-function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A' } = {}) {
+function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [] } = {}) {
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
+  const releases = [], settingsSaved = [];
   const events = new Map(), mediaEvents = new Map(), timers = new Map();
   const listenerOptions = new Map(), mediaCalls = { play: 0, pause: 0 };
   const document = { activeElement: null, querySelector: () => null };
@@ -35,7 +36,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   };
   // useCallback returns the callback, unlike useMemo.
   react.useCallback = (fn, deps) => react.useMemo(() => fn, deps);
-  const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => ({ vid_index: n, vid: `v${n}`, status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
+  const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => ({ vid_index: n, vid: `v${n}`, locked: lockedIndexes.includes(n), status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
   const api = {
     getSeriesList: async () => [{ series_id: seriesId }],
     getSeriesEpisodes: async () => ({ success: true, data: { series_id: seriesId, series_title: '测试剧', total: episodeCount, episodes } }),
@@ -45,7 +46,9 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     transcodeForPlayback: async p => { transcodes.push(p); return transcode ? transcode(p) : { success: true, url: 'file:///mock-compat.mp4' }; },
     cancelTranscodeForPlayback: async p => cancelled.push(p),
     onTranscodeProgress: fn => { transcodeProgress = fn; return () => { transcodeProgress = null; }; },
-    getSettings: async () => ({ compat_mode: true }),
+    getSettings: async () => ({ compat_mode: true, ...settings }),
+    saveSettings: async s => { settingsSaved.push(s); return { success: true }; },
+    releaseOnlinePlay: p => { structuredClone(p); releases.push(p); return Promise.resolve(); },
     compatCacheStatus: async () => ({ success: true, files: 1, bytes: 10 }),
     clearCompatCache: async () => ({ success: true, count: 1 }),
     clearOnlineCache: async () => ({ success: true }),
@@ -84,6 +87,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   };
   render();
   return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
+    releases, settingsSaved,
     transcodeProgress: payload => transcodeProgress?.(payload),
     button: label => find(n => n.type === 'button' && text(n).includes(label)),
     episode: n => find(x => x.props['aria-label'] === `第 ${n} 集`).props.onClick(),

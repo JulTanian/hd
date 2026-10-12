@@ -25,6 +25,7 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   let hits = 0, streamClosed = false;
   const server = http.createServer((r, s) => {
     hits++;
+    if (r.url === '/large') { s.writeHead(200, { 'content-length': String(301 * 1024 * 1024) }); s.write('hello'); return; }
     if (r.url === '/slow') { s.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '99999' }); s.write('hello'); r.on('close', () => streamClosed = true); return; }
     if (r.url === '/broken') { s.writeHead(200, { 'content-length': '99999' }); s.write('hello'); setTimeout(() => s.destroy(), 20); return; }
     const body = Buffer.from('0123456789');
@@ -34,9 +35,48 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   let failures = 0;
-  async function check(name, f) { if (process.argv.includes('--extras') && !name.startsWith('extra:')) return; try { await f(); console.log('PASS ' + name); } catch (e) { failures++; console.error('FAIL ' + name + ': ' + e.message); } }
+  async function check(name, f) { if (process.argv.includes('--prefetch') && !name.startsWith('prefetch:')) return; if (process.argv.includes('--extras') && !name.startsWith('extra:')) return; try { await f(); console.log('PASS ' + name); } catch (e) { failures++; console.error('FAIL ' + name + ': ' + e.message); } }
   const harnesses = [];
   const hload = (fn, overrides) => { const h = load(fn, overrides); harnesses.push(h); return h; };
+  await check('prefetch: plain bytes are cached and reused without another media request', async () => {
+    const h = hload(async () => ({ url: base + '/range' }));
+    const before = hits;
+    const p = await h.handlers['prepare-online-play']({}, { vid: 'next', requestId: 'prefetch', prefetch: true });
+    assert.equal(p.success, true);
+    assert.equal(p.streaming, false, 'prefetch must retain actual media bytes');
+    assert.equal(p.size, 10);
+    assert.equal(hits, before + 1);
+    await h.handlers['release-online-play']({}, { streamId: p.streamId });
+    const next = await h.handlers['prepare-online-play']({}, { vid: 'next' });
+    assert.equal(next.cached, true);
+    assert.equal(await (await h.protocols['hongguo-stream'](new Request(next.url))).text(), '0123456789');
+    assert.equal(hits, before + 1);
+  });
+  await check('prefetch: cancellation and rejected sources do not populate cache', async () => {
+    const h = hload(async () => ({ url: base + '/slow' }));
+    const pending = h.handlers['prepare-online-play']({}, { vid: 'next', requestId: 'cancel', prefetch: true });
+    await sleep(30);
+    await h.handlers['release-online-play']({}, { requestId: 'cancel' });
+    assert.equal((await pending).success, false);
+    assert.equal(h.run('onlineCache.size'), 0);
+    const locked = hload(async () => ({ error: 'locked' }));
+    assert.equal((await locked.handlers['prepare-online-play']({}, { vid: 'hema:locked', prefetch: true })).success, false);
+  });
+  await check('prefetch: cancel during source validation prevents a late download; oversized media is skipped', async () => {
+    let resolve;
+    const h = hload(() => new Promise(r => { resolve = r; }));
+    const before = hits;
+    const pending = h.handlers['prepare-online-play']({}, { vid: 'hema:next', requestId: 'late', prefetch: true });
+    await h.handlers['release-online-play']({}, { requestId: 'late' });
+    resolve({ url: base + '/range' });
+    assert.equal((await pending).success, false);
+    assert.equal(hits, before, 'cancelled lookup must not start downloading');
+    const large = hload(async () => ({ url: base + '/large' }));
+    const result = await large.handlers['prepare-online-play']({}, { vid: 'large', prefetch: true });
+    assert.equal(result.success, false);
+    assert.match(result.error, /过大/);
+    assert.equal(large.run('onlineCache.size'), 0);
+  });
   await check('plain source returns before downloading a single byte', async () => {
     const h = hload(async () => ({ url: base + '/slow', spadeA: '' }));
     const before = hits;
@@ -75,7 +115,9 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     assert.equal((await pending).success, false);
   });
   await check('encrypted fallback retains bytes and correct suffix/invalid Range', async () => {
-    const h = hload(async () => ({ url: base + '/range', spadeA: 'encrypted' }));
+    const h = hload(async () => ({ url: base + '/range', spadeA: 'encrypted' }), {
+      './src/native/decrypt-worker.cjs': { decryptInWorker: async ({ buffer }) => buffer },
+    });
     const p = await h.handlers['prepare-online-play']({}, { vid: 'encrypted' });
     let r = await h.protocols['hongguo-stream'](new Request(p.url, { headers: { range: 'bytes=-3' } }));
     assert.equal(await r.text(), '789');

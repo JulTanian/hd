@@ -134,6 +134,7 @@ function getDefaultSettings() {
     auto_delete_watched: false,
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
+    cache_next_episode: true,
     app_updates_enabled: true,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
@@ -1683,13 +1684,14 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
 }
 
 /** Encrypted sources and compatibility transcoding still require the complete MP4. */
-async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal) {
+async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity) {
   playInfo = playInfo || await hongguo.fetchPlayUrlSingle(vid, seriesId);
   if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
   if (signal?.aborted) throw new Error('已取消播放');
   if (playInfo.contentKey && !/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
   const response = await requestMedia(playInfo, { signal });
   const total = Number(response.headers['content-length']) || 0;
+  if (total > maxBytes) { response.data.destroy(); throw new Error('该集过大，跳过预缓存'); }
   const chunks = [];
   let received = 0, lastProgress = 0;
   if (playInfo.contentKey) {
@@ -1699,6 +1701,7 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
       const input = path.join(temporary, 'encrypted.mp4'), output = path.join(temporary, 'decoded.mp4');
       response.data.on('data', chunk => {
         received += chunk.length;
+        if (received > maxBytes) { response.data.destroy(new Error('该集过大，跳过预缓存')); return; }
         if (onProgress && (Date.now() - lastProgress >= 150 || received === total)) {
           onProgress(received, total); lastProgress = Date.now();
         }
@@ -1714,12 +1717,15 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
     }
   }
   for await (const chunk of response.data) {
-    chunks.push(chunk); received += chunk.length;
+    received += chunk.length;
+    if (received > maxBytes) { response.data.destroy(); throw new Error('该集过大，跳过预缓存'); }
+    chunks.push(chunk);
     if (onProgress && (Date.now() - lastProgress >= 150 || received === total)) {
       onProgress(received, total); lastProgress = Date.now();
     }
   }
   if (signal?.aborted) throw new Error('已取消播放');
+  if (total && received !== total) throw new Error('视频下载不完整，请重试');
   let buf = Buffer.concat(chunks);
   if (playInfo.spadeA) {
     if (onProgress) onProgress(buf.length, buf.length, 'decrypting');
@@ -1731,13 +1737,14 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
 }
 
 ipcMain.handle('prepare-online-play', async (event, payload) => {
-  const { vid, seriesId, vidIndex, requestId } = payload || {};
+  const { vid, seriesId, vidIndex, requestId, prefetch = false } = payload || {};
   if (!vid) return { success: false, error: '缺少 vid' };
   const key = String(vid), streamId = randomUUID();
   const session = { vid: key, requestId, requests: new Set(), entry: null };
   onlineSessions.set(streamId, session);
   try {
     const checkedPlayInfo = /^(xifan|hema):/.test(key) ? await hongguo.fetchPlayUrlSingle(key, seriesId) : null;
+    if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     if (checkedPlayInfo && !checkedPlayInfo.url) throw new Error(checkedPlayInfo.error || '来源未开放该集');
     let entry = onlineCache.get(key), cached = !!entry;
     if (!entry) {
@@ -1750,13 +1757,13 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
           if (controller.signal.aborted) throw new Error('已取消播放');
           if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
           const prepared = { size: 0, lastUsed: Date.now(), seriesId: String(seriesId || ''), vidIndex: Number(vidIndex) || 0 };
-          if (!playInfo.spadeA && !playInfo.contentKey) return { ...prepared, playInfo };
+          if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return { ...prepared, playInfo };
           prepared.buffer = await fetchDecryptedEpisode(key, (received, total, phase) => {
             for (const active of onlineSessions.values()) if (active.vid === key) {
               sendToRenderer('online-play-progress', { vid: key, seriesId, vidIndex, requestId: active.requestId,
                 received, total, percent: total ? Math.floor(received / total * 100) : 0, phase: phase || 'downloading' });
             }
-          }, seriesId, playInfo, controller.signal);
+          }, seriesId, playInfo, controller.signal, prefetch ? ONLINE_MAX_BYTES : Infinity);
           if (controller.signal.aborted) throw new Error('已取消播放');
           prepared.size = prepared.buffer.length;
           onlineCache.set(key, prepared); trimOnlineCache();

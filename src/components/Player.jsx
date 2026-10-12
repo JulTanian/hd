@@ -33,6 +33,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const [detail, setDetail] = useState(null); // { series_title, episodes: [...], total, completedCount }
   const [currentIndex, setCurrentIndex] = useState(1);
   const [autoNext, setAutoNext] = useState(true);
+  const [cacheNext, setCacheNext] = useState(true);
+  const [cacheNextSaving, setCacheNextSaving] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
   const [toast, setToast] = useState(null);
@@ -75,6 +77,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const selectedSeriesRef = useRef('');
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
+  const prefetchRef = useRef(null);
   const mediaVersion = useRef(0);
   const compatRequestRef = useRef(null);
   const decodeTimer = useRef(null);
@@ -104,7 +107,13 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const releaseOnline = useCallback(() => {
     const request = onlineRequestRef.current;
     onlineRequestRef.current = null;
-    if (request) window.electronAPI.releaseOnlinePlay(request).catch(() => {});
+    if (request) window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: request.streamId }).catch(() => {});
+  }, []);
+
+  const releasePrefetch = useCallback(() => {
+    const request = prefetchRef.current;
+    prefetchRef.current = null;
+    if (request) window.electronAPI.releaseOnlinePlay({ requestId: request.requestId }).catch(() => {});
   }, []);
 
   const cancelCompat = useCallback(() => {
@@ -126,6 +135,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     clearTimeout(decodeTimer.current);
     cancelCompat();
     releaseOnline();
+    releasePrefetch();
     setOnlineVid(null);
     setOnlineUrl('');
     setOnlineProgress(null);
@@ -134,7 +144,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     setDecodeFailed(false);
     setPlaybackError('');
     lastSavedRef.current = 0;
-  }, [persistPosition, releaseOnline, cancelCompat]);
+  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
 
   const stopPlayback = (message = '播放已停止，可重试本集继续观看') => {
     const seekTo = currentPosition();
@@ -151,9 +161,10 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     selectedSeriesRef.current = '';
     cancelCompat();
     releaseOnline();
+    releasePrefetch();
     clearTimeout(decodeTimer.current);
     clearTimeout(toastTimer.current);
-  }, [persistPosition, releaseOnline, cancelCompat]);
+  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
 
   const showToast = useCallback((text) => {
     setToast(text);
@@ -223,6 +234,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     window.electronAPI.getSettings().then((s) => {
       if (s) {
         setAutoDelete(s.auto_delete_watched === true);
+        setCacheNext(s.cache_next_episode !== false);
         setAutoCompat(s.compat_mode !== false); // 默认开启
       }
     });
@@ -245,6 +257,21 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
    * useCallback 的依赖数组在「定义时」就会求值，若提前引用后声明的 const
    * 会触发 TDZ（Cannot access 'X' before initialization）导致整页白屏。
    */
+  const toggleCacheNext = async () => {
+    const next = !cacheNext;
+    setCacheNext(next);
+    setCacheNextSaving(true);
+    if (!next) releasePrefetch();
+    try {
+      const settings = await window.electronAPI.getSettings();
+      const result = await window.electronAPI.saveSettings({ ...settings, cache_next_episode: next });
+      if (!result?.success) throw new Error(result?.error || '设置保存失败');
+      showToast(next ? '已开启：开始播放就缓存下一集' : '已关闭缓存下一集');
+    } catch (error) {
+      showToast(`本次已${next ? '开启' : '关闭'}，但未能保存设置：${error.message}`);
+    } finally { setCacheNextSaving(false); }
+  };
+
   const toggleAutoCompat = async () => {
     const next = !autoCompat;
     setAutoCompat(next);
@@ -454,9 +481,11 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
         return;
       }
       const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
+      const prefetched = prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId ? prefetchRef.current : null;
+      if (prefetched) prefetchRef.current = null;
       resetPlayback();
       setCompatMap(prev => { const next = { ...prev }; delete next[vidIndex]; return next; });
-      const request = { requestId: crypto.randomUUID(), vid: ep.vid };
+      const request = prefetched || { requestId: crypto.randomUUID(), vid: ep.vid };
       onlineRequestRef.current = request;
       pendingSeekRef.current = seekTo;
       setCurrentIndex(vidIndex);
@@ -465,7 +494,9 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       setOnlineVid(ep.vid);
       setOnlineUrl('');
       try {
-        const res = await window.electronAPI.prepareOnlinePlay({
+        let res = prefetched ? await prefetched.promise : null;
+        if (onlineRequestRef.current !== request) return;
+        if (!res?.success) res = await window.electronAPI.prepareOnlinePlay({
           requestId: request.requestId,
           vid: ep.vid,
           seriesId: activeSeriesId,
@@ -541,6 +572,25 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     },
     [episodes]
   );
+
+  const prepareNextEpisode = (event) => {
+    const video = event.currentTarget;
+    const media = loadedMediaRef.current;
+    if (!cacheNext || !canPlay || video.paused || !media?.played || media.version !== mediaVersion.current
+      || media.element !== video || (video.currentSrc && video.currentSrc !== videoSrc)) return;
+    const next = findNext(currentIndex);
+    if (!next?.vid || (next.status === 'completed' && next.fileUrl) || prefetchRef.current) return;
+    const request = { requestId: crypto.randomUUID(), vid: next.vid, seriesId: activeSeriesId, vidIndex: next.vid_index };
+    prefetchRef.current = request;
+    request.promise = window.electronAPI.prepareOnlinePlay({ ...request, prefetch: true })
+      .catch(error => ({ success: false, error: error.message }))
+      .then(result => {
+        if (prefetchRef.current !== request && onlineRequestRef.current !== request) {
+          window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: result?.streamId }).catch(() => {});
+        } else if (prefetchRef.current === request) refreshCacheInfo();
+        return result;
+      });
+  };
 
   // 播放结束 -> 连播（未下载的集自动转在线播放，做到「不下载也能连着看」）
   const handleEnded = useCallback(() => {
@@ -746,6 +796,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   };
 
   const clearCache = async () => {
+    releasePrefetch();
     if (onlineRequestRef.current && !compatMap[currentIndex]) {
       stopPlayback('在线播放已停止，可重试本集继续观看');
     }
@@ -869,6 +920,16 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
         <div className="player-header-right" id="player-management">
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
 
+          <button
+            aria-pressed={cacheNext}
+            className={`btn btn-outline ${cacheNext ? 'btn-autonext-on' : ''}`}
+            onClick={toggleCacheNext}
+            disabled={cacheNextSaving}
+            title="当前集开始播放就预缓存下一集，减少切集等待；会使用网络流量"
+          >
+            <Download size={15} />
+            缓存下一集 {cacheNext ? '开' : '关'}
+          </button>
           <button
             aria-pressed={autoNext}
             className={`btn btn-outline ${autoNext ? 'btn-autonext-on' : ''}`}
@@ -1111,6 +1172,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               else video.pause();
             }}
             onLoadedMetadata={handleMetadata}
+            onTimeUpdate={prepareNextEpisode}
             onPlay={(event) => {
               const media = loadedMediaRef.current;
               if (!canPlay || playbackVersion !== mediaVersion.current || !media || media.version !== mediaVersion.current || media.element !== event.currentTarget) {
@@ -1126,7 +1188,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             }}
             onEnded={() => { if (canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded(); }}
             onPause={() => persistPosition(true)}
-            onPlaying={handlePlaying}
+            onPlaying={(event) => { handlePlaying(event); prepareNextEpisode(event); }}
             onWaiting={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(true); }}
             onCanPlay={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(false); }}
             onError={(event) => {
