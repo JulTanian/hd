@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-**当前源码版本为 1.3（配置版本 1.3.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
+**当前源码版本为 1.4（配置版本 1.4.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
 
-[下载 1.3 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.3) · [观看功能介绍](#12-功能介绍视频)
+[下载 1.4 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.4) · [观看功能介绍](#12-功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/3f0f329c-2d02-46e0-879b-ba9d90f003c4
 
 约 1 分 42 秒，介绍画面缩放、窗口置顶、搜索下载与更新提醒。
 
-[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.3)
+[下载原画质视频](https://github.com/jackotom/hongguo-drama/releases/download/v1.2/Hongguo-1.2-Complete-Intro-1.5x.mp4) · [下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.4)
 
 分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
@@ -65,6 +65,13 @@ Mac 正式发行流程包含 Developer ID 签名、Apple 公证和票据装订�
 发行附件提供应用对应源码、各平台 FFmpeg/x264 对应源码和 `SHA256SUMS.txt`。不要把 GitHub 自动生成的 Source code ZIP 当成可直接运行的软件。
 
 仓库已从 `hongguo-drama-mac` 更名为 `hongguo-drama`，本页 1.2 安装包已修正更新地址。**已安装更名前 1.2 的用户，请手动下载替换一次**；应用标识和用户资料位置保持不变。修订精确源码见发行附件 `hongguo-drama-1.2-source.zip`，原 `v1.2` 标签保留首发历史。
+
+## 1.4 修复
+
+- 下载管理的合并下拉框仅列出磁盘上仍有可合并分集的短剧。只在线播放、未下载的剧不会再混入。
+- 下载完成、删除任务和文件后及时刷新候选剧目，删除最后一集后移除对应选项。
+- 仅删除任务记录但保留本地分集时，仍可合并；在线播放剧库不受影响。
+- 后续对外版本按 0.1 递增（1.4、1.5……1.9、2.0），三段配置使用 1.4.0。
 
 ## 1.3 新增与修复
 

@@ -101,12 +101,15 @@ function DownloadManager({ onNavigate, active = true }) {
   const loadSeriesList = useCallback(async () => {
     const request = ++requests.current.series;
     try {
-      const list = (await window.electronAPI.getSeriesList()) || [];
+      const list = (await window.electronAPI.getSeriesList({ downloadedOnly: true })) || [];
       if (!activeRef.current || request !== requests.current.series) return;
       setSeriesList(list);
       setMergeSeriesId((prev) => list.some(item => String(item.series_id) === prev) ? prev : (list[0] ? String(list[0].series_id) : ''));
     } catch (_) {}
   }, []);
+
+  // 列表刷新改选另一部剧时，旧确认框不能继续提交。
+  useEffect(() => { setMergeAsk(false); }, [mergeSeriesId]);
 
   const loadMergeTasks = useCallback(async () => {
     const request = ++requests.current.merges;
@@ -162,6 +165,7 @@ function DownloadManager({ onNavigate, active = true }) {
       }),
       window.electronAPI.onDownloadTaskAdded(() => { fullRefresh = seriesDirty = true; schedule(); }),
       window.electronAPI.onDownloadCompleted((data) => {
+        seriesDirty = true;
         patchTask({ ...data, progress: 100 }, 'completed', true);
       }),
       window.electronAPI.onDownloadFailed((data) => {
@@ -171,7 +175,7 @@ function DownloadManager({ onNavigate, active = true }) {
         patchTask(data, 'stopped', true);
       }),
       window.electronAPI.onDownloadQueueChanged(() => {
-        fullRefresh = queueDirty = true;
+        fullRefresh = queueDirty = seriesDirty = true;
         schedule();
       }),
       window.electronAPI.onMergeTaskAdded(() => loadMergeTasks()),
@@ -192,6 +196,7 @@ function DownloadManager({ onNavigate, active = true }) {
     const timer = setInterval(() => {
       loadQueue();
       refresh();
+      loadSeriesList();
       loadMergeTasks();
     }, 15000);
     return () => {
@@ -238,8 +243,8 @@ function DownloadManager({ onNavigate, active = true }) {
         try {
           const ids = items.map((t) => t.id);
           const res = await window.electronAPI.deleteTasksWithFiles(ids, deleteFiles);
+          await Promise.all([refresh(), loadSeriesList()]);
           if (!res?.success) throw new Error(res?.error || '删除失败，请重试');
-          await refresh();
           showToast(deleteFiles
             ? `已删除 ${res.count} 个任务，释放 ${fmtSize(res.freed)}`
             : `已删除 ${res.count} 个任务记录（本地文件已保留）`);

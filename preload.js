@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSeries: (keyword, options) => ipcRenderer.invoke('search-series', keyword, options),
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
   searchWindowShow: (visible, sourceUrl) => ipcRenderer.invoke('search-window-show', visible, sourceUrl),
-  getSeriesList: () => ipcRenderer.invoke('get-series-list'),
+  getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
   removeSeries: (seriesId) => ipcRenderer.invoke('remove-series', seriesId),
   purgeEmptySeries: () => ipcRenderer.invoke('purge-empty-series'),
   restoreDismissedSeries: () => ipcRenderer.invoke('restore-dismissed-series'),

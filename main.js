@@ -417,7 +417,7 @@ function upsertSeriesRegistry(data) {
   saveSeriesRegistry();
 }
 
-/** 播放页/合并选择器可见的短剧（过滤掉被用户移除的） */
+/** 剧库可见的短剧（过滤掉被用户移除的） */
 function visibleSeries() {
   return seriesRegistry.filter((s) => !s.dismissed);
 }
@@ -925,7 +925,13 @@ ipcMain.handle('search-window-show', async (event, visible, sourceUrl) => {
 });
 
 // 已登记的短剧档案（不含被用户移除的）
-ipcMain.handle('get-series-list', async () => visibleSeries());
+ipcMain.handle('get-series-list', async (event, options) => {
+  const list = visibleSeries();
+  // 合并候选与实际合并共用磁盘检查，不能把在线播放档案当成已下载。
+  return options?.downloadedOnly === true
+    ? list.filter(series => collectSeriesEpisodeFiles(series.series_id, series.series_title).ordered.length > 0)
+    : list;
+});
 
 /** 从列表移除一部短剧（只取消登记，不删本地文件） */
 ipcMain.handle('remove-series', async (event, seriesId) => {
@@ -1252,12 +1258,18 @@ function collectSeriesEpisodeFiles(seriesId, seriesTitle) {
   if (dir && !sharedDirectory) {
     let names = [];
     try { names = fs.readdirSync(dir); } catch (_) {}
+    // 记录清理后仍按应用自己的命名规则识别分集，避免把标题里的数字当集号。
+    const episodeNames = new Map();
+    const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
+    const entry = seriesRegistry.find(series => String(series.series_id) === sid);
+    for (const episode of entry?.episodes || []) {
+      for (const name_format of formats) episodeNames.set(uniqueEpisodeFilename({ name_format }, seriesTitle, episode), Number(episode.vid_index));
+    }
     for (const n of names) {
       if (!/\.mp4$/i.test(n) || n.includes('合集')) continue;
       // 形如「剧名 001.mp4」——取文件名末尾的数字作为集号
       const m = n.match(/(\d{1,4})\.mp4$/i);
-      if (!m) continue;
-      const idx = parseInt(m[1], 10);
+      const idx = episodeNames.get(n) || (m ? parseInt(m[1], 10) : 0);
       if (!idx || byIndex.has(idx)) continue;
       const full = path.join(dir, n);
       if (registeredPaths.has(full)) continue;

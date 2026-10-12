@@ -45,6 +45,29 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
 (async () => {
   let failures = 0, passed = 0;
   const test = async (name, fn) => { if (process.argv[2] && !new RegExp(process.argv[2]).test(name)) return; try { await fn(); passed++; } catch (error) { failures++; console.error(`FAIL ${name}: ${error.stack}`); } };
+  await test('merge selector requests downloaded files and refreshes after completion and deletion', async () => {
+    let list = [], options;
+    const ui = mount({ getSeriesList: async value => { options = value; return list; }, getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => { list = []; return { success: true, count: 1, freed: 120000 }; } });
+    await ui.flush(); assert.equal(options?.downloadedOnly, true, 'merge selector must request real local episodes');
+    assert.equal(ui.button('合并整部剧'), undefined);
+    list = [{ series_id: 'A', series_title: 'Downloaded' }];
+    ui.emit('onDownloadCompleted', { id: 't1' }); ui.advance(250); await ui.flush();
+    assert.ok(ui.button('合并整部剧'), 'completed downloads must appear immediately');
+    rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
+    ui.find(n => n.props.className === 'dm-confirm-check').children.find(n => n.type === 'input').props.onChange({ target: { checked: true } }); ui.render();
+    await ui.button('删除任务和文件').props.onClick(); await ui.flush();
+    assert.equal(ui.button('合并整部剧'), undefined, 'last deleted episode must remove its merge option');
+    ui.unmount();
+  });
+  await test('periodic refresh drops externally removed merge files and resets selection', async () => {
+    let list = [{ series_id: 'A', series_title: 'A' }, { series_id: 'B', series_title: 'B' }];
+    const ui = mount({ getSeriesList: async () => list }); await ui.flush();
+    ui.button('合并整部剧').props.onClick(); ui.render(); assert.ok(ui.button('智能快速合并'));
+    list = [list[1]]; ui.advance(15000); await ui.flush();
+    assert.equal(ui.button('智能快速合并'), undefined, 'changed target must close the existing confirmation');
+    const select = ui.find(n => n.type === 'select' && n.props.className?.includes('merge-select'));
+    assert.equal(select.props.value, 'B'); ui.unmount();
+  });
   await test('one initial snapshot and no polling or focus trap while hidden', async () => {
     let calls = 0;
     const ui = mount({ getDownloadTasks: async () => { calls++; return [task(1)]; } });

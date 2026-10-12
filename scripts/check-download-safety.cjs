@@ -28,6 +28,33 @@ function series() { return [{ series_id: 'S', series_title: 'Short', episodes: [
 function file(p) { fs.writeFileSync(p, Buffer.alloc(120000)); }
 async function check(name, run) { try { await run(); console.log('PASS ' + name); } catch (error) { failures++; console.error('FAIL ' + name + ': ' + error.message); } }
 (async () => {
+  await check('merge list excludes online-only and deleted files without hiding the library', async () => {
+    const h = load(); h.set('seriesRegistry', series());
+    const list = () => h.handlers['get-series-list']({}, { downloadedOnly: true });
+    assert.equal((await list()).length, 0, 'online-only series must not be merge candidates');
+    const one = task('one', h.dir); file(one.savePath); h.set('downloadTasks', [one]);
+    assert.equal((await list()).length, 1, 'existing downloaded episode must remain mergeable');
+    fs.unlinkSync(one.savePath);
+    assert.equal((await list()).length, 0, 'deleted files must not leave merge candidates');
+    assert.equal((await h.handlers['get-series-list']({})).length, 1, 'online library must remain intact');
+    h.set('downloadTasks', []);
+    const dir = h.context.seriesDownloadDir(h.dir, 'S', 'Short'); fs.mkdirSync(dir, { recursive: true });
+    file(path.join(dir, 'Short 001.mp4'));
+    assert.equal((await list()).length, 1, 'disk files retained after record cleanup remain mergeable');
+  });
+  await check('record-only deletion keeps downloaded files mergeable for built-in naming formats', async () => {
+    for (const name_format of ['剧名', '剧名 集数', '剧名 集数 标题']) {
+      const h = load({ name_format });
+      const entry = series()[0]; entry.episodes[0].title = 'Story 999'; h.set('seriesRegistry', [entry]);
+      await h.context.enqueueEpisodes({ seriesId: 'S', seriesTitle: 'Short', episodes: entry.episodes });
+      const tasks = h.run('downloadTasks');
+      for (const item of tasks) { fs.mkdirSync(path.dirname(item.savePath), { recursive: true }); file(item.savePath); item.status = 'completed'; }
+      const removed = await h.handlers['delete-tasks']({}, tasks.map(item => item.id), { deleteFiles: false });
+      assert.equal(removed.success, true); assert.ok(tasks.every(item => fs.existsSync(item.savePath)));
+      assert.equal((await h.handlers['get-series-list']({}, { downloadedOnly: true })).length, 1, name_format);
+      assert.equal(JSON.stringify(h.context.collectSeriesEpisodeFiles('S', 'Short').ordered.map(item => item.vid_index)), '[1,2]', name_format);
+    }
+  });
   await check('title-only preset keeps episode destinations unique', async () => {
     const h = load({ name_format: '剧名' });
     await h.context.enqueueEpisodes({ seriesId: 'S', seriesTitle: 'Short', episodes: series()[0].episodes });
