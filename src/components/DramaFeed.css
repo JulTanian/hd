@@ -18,11 +18,6 @@
 .drama-feed-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 300px; text-align: center; padding: 32px; }
 .drama-feed-state h3, .drama-feed-state p { margin: 0; }
 .drama-feed-state p { color: var(--text-secondary); line-height: 1.7; max-width: 60ch; overflow-wrap: anywhere; }
-.drama-feed .player-container { max-width: none; }
-.drama-feed .player-header[hidden], .drama-feed .player-series-row[hidden] { display: none; }
-.drama-feed .player-stage { overscroll-behavior: contain; }
-.drama-feed .episodes-collapsed .player-episode-panel { display: none; }
-.drama-feed .player-episode-panel { max-height: 360px; overflow-y: auto; }
 .drama-feed button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 800px) {
   .drama-feed-header, .drama-feed-info { align-items: flex-start; flex-wrap: wrap; gap: 12px; }

@@ -16,7 +16,7 @@ import ReleaseCalendar from './components/ReleaseCalendar';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
-  { id: 'feed', label: '热播刷剧', icon: Film },
+  { id: 'feed', label: '热播推荐', icon: Film },
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
