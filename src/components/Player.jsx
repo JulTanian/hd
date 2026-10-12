@@ -33,6 +33,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const [detail, setDetail] = useState(null); // { series_title, episodes: [...], total, completedCount }
   const [currentIndex, setCurrentIndex] = useState(1);
   const [autoNext, setAutoNext] = useState(true);
+  const [autoAdvancing, setAutoAdvancing] = useState(false);
   const [cacheNext, setCacheNext] = useState(true);
   const [cacheNextSaving, setCacheNextSaving] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -125,6 +126,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   }, []);
 
   const resetPlayback = useCallback(() => {
+    setAutoAdvancing(false);
     persistPosition(true);
     const previous = loadedMediaRef.current;
     loadedMediaRef.current = null;
@@ -448,6 +450,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       media.played = true;
       persistPosition(true);
     }
+    setAutoAdvancing(false);
     setDecodeFailed(false);
     setMediaBuffering(false);
     const idx = currentIndex;
@@ -615,6 +618,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       return;
     }
     goToEpisode(next.vid_index, 0);
+    setAutoAdvancing(true);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findNext, goToEpisode, showToast, startOnlinePlay, autoDelete, episodes, refreshCacheInfo, loadDetail]);
@@ -649,7 +653,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     }
     pendingSeekRef.current = 0;
     if (compatMap[currentIndex]) releaseOnline();
-    v.play().catch(() => {});
+    v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
   };
 
   // Capture handled keys before media controls; cancel keyup too so focused buttons cannot toggle twice.
@@ -1206,7 +1210,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               if (failedDecode && autoCompat && !compatUrl && autoCompatAttemptRef.current !== mediaVersion.current) startCompatPlay(currentIndex);
             }}
           />
-        <PlayerControls portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
+        <PlayerControls continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>

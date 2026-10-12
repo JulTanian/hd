@@ -17,7 +17,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     useRef: value => { const i = cursor++; return slots[i] ||= { current: value }; },
     useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => v !== slots[i][j])) { slots[i] = deps; effects.push(() => { cleanups[i]?.(); cleanups[i] = fn(); }); } },
   };
-  const media = { paused: true, currentTime: 12, duration: 100, muted: false, volume: 0.7,
+  const media = { paused: true, ended: false, currentTime: 12, duration: 100, muted: false, volume: 0.7,
     play: async () => { plays++; media.paused = false; listeners.get('play')?.(); },
     pause: () => { pauses++; media.paused = true; listeners.get('pause')?.(); },
     addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
@@ -50,8 +50,23 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   await find('播放').props.onClick(); render(); advance(); render();
   const hidden = () => tree.props.className.includes('controls-hidden');
   assert.ok(hidden(), 'playing in landscape fullscreen must hide idle controls');
+  props.autoContinue = true; render();
+  media.ended = true; media.pause(); render();
+  assert.ok(hidden(), 'end-of-episode pause before ended must not reveal controls when auto-next is available');
+  props.continuing = true; props.autoContinue = false; props.available = false; render();
+  assert.ok(hidden(), 'online preparation must retain hidden controls, including transition into the final episode');
+  props.source = 'two'; props.available = true; media.ended = false;
+  listeners.get('emptied')?.(); render();
+  assert.ok(hidden(), 'loading the next source must not reveal controls');
+  listeners.get('loadedmetadata')?.(); render();
+  assert.ok(hidden(), 'metadata while paused must not reveal controls during auto-next');
+  await media.play(); props.continuing = false; render();
+  assert.ok(hidden(), 'starting the next episode must retain hidden controls');
   stageListeners.get('pointermove')(); render(); assert.ok(!hidden(), 'moving the pointer reveals controls');
   advance(); render(); assert.ok(hidden());
+  media.ended = true; media.pause(); render();
+  assert.ok(!hidden(), 'last episode or disabled auto-next restores controls at the end');
+  media.ended = false; await media.play(); render(); advance(); render();
   media.pause(); render(); assert.ok(!hidden(), 'pausing keeps controls visible');
   await media.play(); render();
   find('更多播放选项').props.onClick(); render(); advance(); render(); assert.ok(!hidden(), 'open menu prevents hiding');
@@ -66,11 +81,43 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   props.portrait = true; render(); advance(); render(); assert.ok(hidden(), 'portrait retains auto-hide');
   props.windowFill = true; props.onWindowFill = value => { props.windowFill = value; }; render();
   stageListeners.get('pointermove')(); render(); assert.ok(!hidden()); advance(); render(); assert.ok(hidden(), 'window fill auto-hides');
+  props.continuing = true; props.available = false; media.pause(); render();
+  assert.ok(hidden(), 'window fill keeps controls hidden while auto-next prepares');
+  props.continuing = false; props.autoContinue = true; media.ended = true; listeners.get('ended')?.(); render();
+  assert.ok(!hidden(), 'failed auto-next restores controls even when the retained frame ended and later episodes exist');
   props.available = false; render(); render(); assert.ok(!hidden(), 'unavailable media keeps controls visible');
   media.pause(); render();
 
   media.duration = NaN; listeners.get('durationchange')(); render(); assert.equal(find('播放进度').props.disabled, true);
   props.available = false; render(); assert.equal(find('播放').props.disabled, true);
   cleanups.forEach(fn => fn?.()); assert.equal(listeners.size, 0); assert.equal(documentListeners.size, 0); assert.equal(stageListeners.size, 0); assert.equal(windowListeners.size, 0); assert.equal(timers.size, 0);
-  console.log('PASS video controls: play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, pause/menu/drag/focus guards, portrait and exit cleanup');
+  const { mount } = require('./check-player-resume.cjs');
+  const controls = ui => ui.find(node => node.props.onRateChange && node.props.videoRef);
+  for (const local of [true, false]) {
+    let finishNext;
+    const ui = mount({ local, props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'mock:first' } : new Promise(resolve => { finishNext = resolve; }) });
+    await ui.flush(); ui.metadata(); await ui.flush();
+    assert.equal(controls(ui).props.autoContinue, true, 'parent marks whether an unlocked next episode can follow');
+    ui.find(node => node.type === 'video').props.onEnded(); await ui.flush();
+    assert.equal(controls(ui).props.continuing, true, `parent retains auto-next intent through source preparation (local=${local})`);
+    assert.equal(controls(ui).props.autoContinue, false, 'final episode has no following episode');
+    if (!local) { finishNext({ success: true, url: 'mock:second' }); await ui.flush(); }
+    assert.equal(controls(ui).props.continuing, true, 'auto-next intent remains until playback actually starts');
+    ui.metadata(); await ui.flush();
+    assert.equal(controls(ui).props.continuing, false, 'playing clears the transition so later manual pause is visible');
+    ui.unmount();
+  }
+  const failed = mount({ props: { setEpisodesOpen() {}, target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'mock:first' } : { success: false, error: 'test preparation failure' } });
+  await failed.flush(); failed.metadata(); await failed.flush();
+  failed.find(node => node.type === 'video').props.onEnded(); await failed.flush();
+  assert.equal(controls(failed).props.continuing, false, 'failed online preparation must restore ordinary pause behavior');
+  failed.unmount();
+  const blocked = mount({ local: true, props: { setEpisodesOpen() {} } });
+  await blocked.flush(); blocked.metadata(); await blocked.flush();
+  blocked.find(node => node.type === 'video').props.onEnded(); await blocked.flush();
+  blocked.media.play = async () => { throw new Error('test autoplay denied'); };
+  blocked.metadata(); await blocked.flush();
+  assert.equal(controls(blocked).props.continuing, false, 'autoplay rejection must leave the play control accessible');
+  blocked.unmount();
+  console.log('PASS video controls: play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -8,8 +8,8 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ videoRef, stageRef, source, available, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
-  const [media, setMedia] = useState({ paused: true, time: 0, duration: 0, muted: false, volume: 1 });
+export default function PlayerControls({ videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
+  const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [controlsHidden, setControlsHidden] = useState(false);
@@ -30,15 +30,15 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
     const stage = stageRef.current;
     let timer;
     let dragging = false;
-    const reveal = () => {
+    const scheduleHide = () => {
       clearTimeout(timer);
-      setControlsHidden(false);
       if ((portrait || expanded) && available && !media.paused && !menuOpen && !dragging) {
         timer = setTimeout(() => {
           if (!controlsRef.current?.querySelector(':focus-visible')) setControlsHidden(true);
         }, 2000);
       }
     };
+    const reveal = () => { setControlsHidden(false); scheduleHide(); };
     const startDrag = event => { if (event.target.closest('input[type="range"]')) { dragging = true; reveal(); } };
     const stopDrag = () => { if (dragging) { dragging = false; reveal(); } };
     stage?.addEventListener('pointermove', reveal);
@@ -50,7 +50,9 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
     window.addEventListener('pointerup', stopDrag);
     window.addEventListener('pointercancel', stopDrag);
     window.addEventListener('blur', stopDrag);
-    reveal();
+    // Source changes and automatic handoffs are not user activity.
+    if (!(portrait || expanded) || menuOpen || (!continuing && (!available || (media.paused && !(media.ended && autoContinue))))) reveal();
+    else scheduleHide();
     return () => {
       clearTimeout(timer);
       stage?.removeEventListener('pointermove', reveal);
@@ -63,13 +65,13 @@ export default function PlayerControls({ videoRef, stageRef, source, available, 
       window.removeEventListener('pointercancel', stopDrag);
       window.removeEventListener('blur', stopDrag);
     };
-  }, [portrait, expanded, available, media.paused, menuOpen, source, stageRef]);
+  }, [portrait, expanded, available, media.paused, media.ended, continuing, autoContinue, menuOpen, source, stageRef]);
 
   useEffect(() => {
     setMenuOpen(false);
     const video = videoRef.current;
     if (!video) return;
-    const sync = () => setMedia({ paused: video.paused, time: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+    const sync = () => setMedia({ paused: video.paused, ended: video.ended, time: Number.isFinite(video.currentTime) ? video.currentTime : 0,
       duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0, muted: video.muted, volume: video.volume });
     const events = ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata', 'durationchange', 'volumechange', 'emptied'];
     events.forEach(name => video.addEventListener(name, sync));
