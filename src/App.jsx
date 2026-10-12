@@ -40,6 +40,7 @@ export default function App() {
   const [visited, setVisited] = useState(['browse']);
   const [storageError, setStorageError] = useState('');
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
+  const [playerMounted, setPlayerMounted] = useState(false);
   const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
 
   useEffect(() => {
@@ -61,11 +62,13 @@ export default function App() {
       if (!data || !data.page) return;
       if (data.payload) setPlayerTarget({ ...data.payload, ts: Date.now() });
       setVisited((pages) => pages.includes(data.page) ? pages : [...pages, data.page]);
+      if (data.page === 'player' || data.page === 'feed') setPlayerMounted(data.page === 'player');
       setPage(data.page);
     });
   }, []);
 
   const navigate = (nextPage) => {
+    if (nextPage === 'player' || nextPage === 'feed') setPlayerMounted(nextPage === 'player');
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
   };
@@ -75,7 +78,7 @@ export default function App() {
       case 'browse':
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
-        return page === 'feed' ? null : <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onNavigate={navigate} />;
+        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onNavigate={navigate} /> : null;
       case 'feed':
         return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
