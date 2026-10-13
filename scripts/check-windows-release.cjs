@@ -38,8 +38,10 @@ async function evaluate(expression) {
   return reply.result.value;
 }
 async function clickControl(label) {
-  const point = await evaluate(`(() => {
+  const point = await evaluate(`(async () => {
     const button = document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)});
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    await new Promise(requestAnimationFrame);
     const rect = button.getBoundingClientRect();
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`);
