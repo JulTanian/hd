@@ -3,6 +3,7 @@ import { Play, Pause } from './icons';
 import './PlayerControls.css';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, shortcutKey } from '../shortcuts';
 import { VideoEnhancementControls } from './VideoEnhancement';
+import { DanmakuSettings } from './CommentDanmaku';
 
 const formatTime = seconds => {
   const value = Math.max(0, Math.floor(seconds || 0));
@@ -10,10 +11,14 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [danmakuOpen, setDanmakuOpen] = useState(false);
+  const danmakuPanelRef = useRef(null);
+  const danmakuButtonRef = useRef(null);
+  const [danmakuHeight, setDanmakuHeight] = useState(300);
   const [menuHeight, setMenuHeight] = useState(240);
   const [controlsHidden, setControlsHidden] = useState(false);
   const controlsRef = useRef(null);
@@ -40,7 +45,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
 
   useEffect(() => {
     if (!windowFill) return;
-    const escape = event => { if (event.key === 'Escape') onWindowFill(false); };
+    const escape = event => { if (event.key === 'Escape' && !event.defaultPrevented && !event.target.closest?.('.danmaku-settings')) onWindowFill(false); };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, [windowFill, onWindowFill]);
@@ -52,7 +57,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
     let dragging = false;
     const scheduleHide = () => {
       clearTimeout(timer);
-      if ((portrait || expanded) && available && !media.paused && !menuOpen && !dragging) {
+      if ((portrait || expanded) && available && !media.paused && !menuOpen && !danmakuOpen && !dragging) {
         timer = setTimeout(() => {
           if (!controlsRef.current?.querySelector(':focus-visible')) setControlsHidden(true);
         }, 2000);
@@ -96,7 +101,7 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
     const onBlur = () => { episodeKeysRef.current.clear(); stopDrag(); };
     window.addEventListener('blur', onBlur);
     // Source changes and automatic handoffs are not user activity.
-    if (!(portrait || expanded) || menuOpen || (!continuing && !available)) reveal();
+    if (!(portrait || expanded) || menuOpen || danmakuOpen || (!continuing && !available)) reveal();
     else if (!continuing && media.paused && !(media.ended && autoContinue)) {
       // A native pause can precede ended; explicit key/click pauses already reveal immediately.
       if (autoContinue && controlsHidden) pauseTimer = setTimeout(() => {
@@ -117,10 +122,11 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
       window.removeEventListener('pointercancel', stopDrag);
       window.removeEventListener('blur', onBlur);
     };
-  }, [portrait, expanded, available, media.paused, media.ended, continuing, autoContinue, menuOpen, source, stageRef, shortcuts]);
+  }, [portrait, expanded, available, media.paused, media.ended, continuing, autoContinue, menuOpen, danmakuOpen, source, stageRef, shortcuts]);
 
   useEffect(() => {
     setMenuOpen(false);
+    setDanmakuOpen(false);
     const video = videoRef.current;
     if (!video) return;
     const sync = () => setMedia({ paused: video.paused, ended: video.ended, time: Number.isFinite(video.currentTime) ? video.currentTime : 0,
@@ -151,6 +157,26 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!danmakuOpen) return;
+    const measure = () => {
+      const stage = stageRef.current?.getBoundingClientRect();
+      const controls = controlsRef.current?.getBoundingClientRect();
+      if (stage && controls) setDanmakuHeight(Math.max(60, controls.top - stage.top - 12));
+    };
+    const outside = event => {
+      if (!danmakuPanelRef.current?.contains(event.target) && !danmakuButtonRef.current?.contains(event.target)) setDanmakuOpen(false);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (stageRef.current) observer.observe(stageRef.current);
+    if (controlsRef.current) observer.observe(controlsRef.current);
+    document.addEventListener('pointerdown', outside);
+    return () => { observer.disconnect(); document.removeEventListener('pointerdown', outside); };
+  }, [danmakuOpen, stageRef]);
+
+  const closeDanmaku = () => { setDanmakuOpen(false); danmakuButtonRef.current?.focus(); };
 
   const togglePlay = async () => {
     const video = videoRef.current;
@@ -183,12 +209,21 @@ export default function PlayerControls({ enhancement, shortcuts = DEFAULT_SHORTC
           </button>
           <input type="range" aria-label="音量" aria-valuetext={`${Math.round((media.muted ? 0 : media.volume) * 100)}%`} min="0" max="1" step="0.05" value={media.muted ? 0 : media.volume} onChange={changeVolume} />
         </div>
+        {danmaku && <>
+          <button type="button" data-player-menu className={`danmaku-toggle ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={danmaku.enabled ? '关闭评论弹幕' : '开启评论弹幕'} aria-pressed={danmaku.enabled}
+            title={danmaku.supported ? '将当前集公开评论显示在画面上' : '仅红果来源的当前集支持评论弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}>弹幕</button>
+          <button type="button" data-player-menu ref={danmakuButtonRef} aria-label="弹幕设置" title="评论弹幕设置" aria-haspopup="dialog" aria-expanded={danmakuOpen}
+            onClick={() => { setMenuOpen(false); setDanmakuOpen(open => !open); }}>
+            <Icon><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="currentColor" /><circle cx="15" cy="17" r="2" fill="currentColor" /></Icon>
+          </button>
+          {danmakuOpen && <DanmakuSettings danmaku={danmaku} onClose={closeDanmaku} panelRef={danmakuPanelRef} maxHeight={danmakuHeight} />}
+        </>}
         <button type="button" data-player-control aria-label={expanded ? '退出全屏' : '全屏'} title={`${expanded ? '退出全屏' : portrait ? '填满当前窗口' : '全屏'}（${formatShortcut(shortcuts.fullscreen)}）`} onClick={onToggleFullscreen}>
           <Icon><path d={expanded ? 'M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6'} /></Icon>
         </button>
         <button type="button" data-player-control className="player-controls-rate" aria-label="增加播放速度" title={`播放速度 ${rate}×，点击增加 0.25 倍，4 倍后回到 1 倍`} onClick={() => onRateChange(rate >= 4 ? 1 : Math.min(4, rate + 0.25))}>{rate}×</button>
         <div className="player-controls-options" data-player-menu ref={menuRef}>
-          <button type="button" ref={menuButtonRef} aria-label="更多播放选项" title="更多播放选项" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+          <button type="button" ref={menuButtonRef} aria-label="更多播放选项" title="更多播放选项" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => { setDanmakuOpen(false); setMenuOpen(open => !open); }}>
             <Icon><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></Icon>
           </button>
           {menuOpen && <div className="player-controls-menu" style={{ maxHeight: menuHeight }} role="dialog" aria-label="播放选项">
