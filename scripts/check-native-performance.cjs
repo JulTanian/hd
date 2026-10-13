@@ -27,7 +27,7 @@ function fixture({ web = true, api = false, app = false, blockedVids = [], html 
   };
   const context = {
     module: { exports: {} }, Buffer, process: { env: {} },
-    require: name => name === 'axios' ? axios : name === './app-source' ? { fetchAppPlayUrl: async () => { state.appCalls++; if (!state.app) throw Error('app unavailable'); return { url: 'https://media.example/app.mp4', contentKey: '01'.repeat(16), source: 'app' }; } } : require(name),
+    require: name => name === 'axios' ? axios : name === './app-source' ? { fetchAppPlayUrl: async () => { state.appCalls++; if (!state.app) throw Error('app unavailable'); return { url: 'https://media.example/app.mp4', contentKey: '01'.repeat(16), source: 'app' }; } } : require(name.startsWith('.') ? path.join(path.dirname(sourcePath), name) : name),
     Date: class extends Date { static now() { return now; } },
     setTimeout: fn => { state.waits++; fn(); },
     console: { warn() {}, log() {} },

@@ -23,6 +23,7 @@ const { pipeline } = require('node:stream/promises');
 const { randomUUID, createHash } = require('node:crypto');
 
 const hongguo = require('./src/native/hongguo');
+const { normalizeDownloadQuality, meetsDownloadQuality } = require('./src/native/download-quality');
 const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
@@ -139,6 +140,7 @@ function getDefaultSettings() {
     // 文件命名模板：可用变量 剧名(series_title) 集数(vid_index) 标题(ep_title)
     name_format: '剧名 集数',
     max_concurrent: 3,
+    download_quality: 'auto',
     // 看完一集后自动删除本地文件（边看边清，避免占用磁盘）
     auto_delete_watched: false,
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
@@ -543,6 +545,21 @@ async function executeDownload(task) {
 }
 
 // ===== 红果短剧下载 =====
+async function verifyDownloadQuality(file, quality, existing = false) {
+  quality = normalizeDownloadQuality(quality);
+  if (quality === 'auto') return null;
+  const ffprobe = resolveFfmpeg('ffprobe');
+  const info = ffprobe ? await probeVideoInfo(ffprobe, file) : null;
+  const prefix = existing ? '已有本地文件' : '片源文件';
+  if (!info || !(info.w > 0) || !(info.h > 0)) {
+    throw new Error(`${prefix}无法核实实际分辨率，未按 ${quality.toUpperCase()} 完成下载`);
+  }
+  if (!meetsDownloadQuality({ width: info.w, height: info.h }, quality)) {
+    throw new Error(`${prefix}实际为 ${Math.min(info.w, info.h)}P（${info.w}×${info.h}），不满足 ${quality.toUpperCase()}${existing ? '；文件已保留，如需重新下载请先自行移除本地文件' : '，未自动降级'}`);
+  }
+  return `${Math.min(info.w, info.h)}p`;
+}
+
 async function executeHongguoDownload(task) {
   const { id, hongguoInfo, filename } = task;
   const { vid, series_title } = hongguoInfo || {};
@@ -553,6 +570,8 @@ async function executeHongguoDownload(task) {
     task.status = 'downloading'; task.cancelled = false; task.progress = 0;
     sendToRenderer('download-progress', { id, progress: 0, receivedBytes: 0, totalBytes: 0 });
     const settings = getCurrentSettings();
+    // Old and retried tasks retain their original policy, independent of new defaults.
+    const quality = normalizeDownloadQuality(task.downloadQuality);
     const root = String(settings.root || '').trim() || app.getPath('downloads');
     const downloadDir = task.customDir || seriesDownloadDir(root, hongguoInfo?.series_id, series_title);
     fs.mkdirSync(downloadDir, { recursive: true });
@@ -560,16 +579,18 @@ async function executeHongguoDownload(task) {
     task.savePath = finalPath;
     // Recheck source access before reusing an existing third-party file or URL.
     const checkedPlayInfo = /^(xifan|hema):/.test(String(vid))
-      ? await hongguo.fetchPlayUrlSingle(vid, hongguoInfo?.series_id) : null;
+      ? await hongguo.fetchPlayUrlSingle(vid, hongguoInfo?.series_id, { quality }) : null;
     if (checkedPlayInfo && !checkedPlayInfo.url) throw new Error(checkedPlayInfo.error || '来源未开放该集');
     // Existing complete files need no additional media transfer.
     source.token.throwIfRequested();
     if (hasCompleteTaskFile(task)) {
+      task.actualQuality = await verifyDownloadQuality(finalPath, quality, true);
+      source.token.throwIfRequested();
       task.status = 'completed'; task.progress = 100; task.endTime = Date.now();
       saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
       return;
     }
-    const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(vid, hongguoInfo?.series_id);
+    const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(vid, hongguoInfo?.series_id, { quality });
     source.token.throwIfRequested();
     if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
     tmpPath = finalPath + '.enc.tmp';
@@ -595,6 +616,7 @@ async function executeHongguoDownload(task) {
       const decodedPath = tmpPath + '.decoded';
       try {
         await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
+        task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
         source.token.throwIfRequested();
         fs.renameSync(decodedPath, finalPath);
       } finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
@@ -606,12 +628,17 @@ async function executeHongguoDownload(task) {
       const decodedPath = tmpPath + '.decoded';
       try {
         await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
+        task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
         source.token.throwIfRequested();
         fs.renameSync(decodedPath, finalPath);
       }
       finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
       fs.unlinkSync(tmpPath);
-    } else fs.renameSync(tmpPath, finalPath);
+    } else {
+      task.actualQuality = await verifyDownloadQuality(tmpPath, quality);
+      source.token.throwIfRequested();
+      fs.renameSync(tmpPath, finalPath);
+    }
     task.status = 'completed'; task.progress = 100; task.endTime = Date.now();
     saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
   } catch (error) {
@@ -2201,8 +2228,10 @@ ipcMain.handle('decode-capability', async () => ({
  * 把若干集加入下载队列（批量下载与播放器「下载本集」共用）。
  * 返回新建的任务数。
  */
-async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover }) {
+async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality }) {
   if (!Array.isArray(episodes) || episodes.length === 0) return 0;
+  const settings = getCurrentSettings();
+  const downloadQuality = normalizeDownloadQuality(quality ?? settings.download_quality);
   if (/^(xifan|hema):/.test(String(seriesId))) {
     const current = await hongguo.fetchEpisodeList(seriesId);
     episodes = episodes.map(requested => {
@@ -2215,7 +2244,17 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover }) {
     throw new Error('剧集来源不匹配');
   }
 
-  const settings = getCurrentSettings();
+  // Validate duplicates before mutating any part of a batch. Never replace a user's file.
+  for (const ep of episodes) {
+    const dup = downloadTasks.find(t => String(t.hongguoInfo?.vid) === String(ep.vid));
+    if (!dup) continue;
+    if (['pending', 'downloading'].includes(dup.status) && normalizeDownloadQuality(dup.downloadQuality) !== downloadQuality) {
+      throw new Error('同一集已有其他清晰度的下载任务，请先停止该任务再重新选择');
+    }
+    if (dup.status === 'completed' && hasCompleteTaskFile(dup)) {
+      await verifyDownloadQuality(dup.savePath, downloadQuality, true);
+    }
+  }
   const root = (settings.root && String(settings.root).trim()) ? String(settings.root).trim() : app.getPath('downloads');
   const cleanSeriesTitle = sanitizeFolderName(seriesTitle) || '红果短剧';
   const downloadDir = seriesDownloadDir(root, seriesId, cleanSeriesTitle);
@@ -2255,6 +2294,8 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover }) {
         dup.progress = 0;
         dup.receivedBytes = 0;
         dup.totalBytes = 0;
+        dup.downloadQuality = downloadQuality;
+        delete dup.actualQuality;
         delete dup.error;
         if (!downloadQueue.some((t) => t.id === dup.id)) downloadQueue.push(dup);
         created++;
@@ -2272,6 +2313,7 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover }) {
       filename,
       platform: 'hongguo',
       type: 'hongguo',
+      downloadQuality,
       status: 'pending',
       progress: 0,
       receivedBytes: 0,
@@ -2313,11 +2355,11 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover }) {
 
 ipcMain.handle('hongguo-download-batch', async (event, payload) => {
   try {
-    const { seriesId, seriesTitle, episodes } = payload || {};
+    const { seriesId, seriesTitle, episodes, quality } = payload || {};
     if (!Array.isArray(episodes) || episodes.length === 0) {
       return { success: false, error: '未选择集数' };
     }
-    const count = await enqueueEpisodes({ seriesId, seriesTitle, episodes });
+    const count = await enqueueEpisodes({ seriesId, seriesTitle, episodes, quality });
     return { success: true, count, requested: episodes.length };
   } catch (error) {
     console.error('[Hongguo] 提交批量下载失败:', error.message);
@@ -2326,7 +2368,7 @@ ipcMain.handle('hongguo-download-batch', async (event, payload) => {
 });
 
 // 播放器里「下载本集」：按 series_id + vid_index 补单集
-ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex) => {
+ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex, quality) => {
   try {
     const entry = seriesRegistry.find((s) => String(s.series_id) === String(seriesId));
     if (!entry) return { success: false, error: '未找到该剧档案，请先解析一次' };
@@ -2337,6 +2379,7 @@ ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex) => {
       seriesTitle: entry.series_title,
       episodes: [{ ...ep, cover: entry.cover }],
       cover: entry.cover,
+      quality,
     });
     return { success: true, count };
   } catch (error) {
@@ -2460,6 +2503,7 @@ ipcMain.handle('save-settings', async (event, settings) => {
   try {
     const wasCheckingUpdates = getCurrentSettings().app_updates_enabled !== false;
     const merged = { ...getDefaultSettings(), ...(settings || {}) };
+    merged.download_quality = normalizeDownloadQuality(merged.download_quality);
     store.saveSettings(merged);
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
       sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);

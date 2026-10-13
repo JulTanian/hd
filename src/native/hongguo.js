@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('node:url');
+const { normalizeDownloadQuality } = require('./download-quality');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
@@ -464,10 +465,14 @@ function parseModelVideo(vm) {
  * 获取单集播放直链与 spade_a 加密 key
  */
 async function fetchPlayUrlSingle(vid, sid, options = {}) {
-  if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
-  if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
   try {
-    return await cachedRequest(`play:${sid || ''}:${vid}`, 30000, () => fetchPlayUrlFresh(vid, sid), options);
+    const quality = normalizeDownloadQuality(options.quality);
+    if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
+    if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
+    const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}`;
+    return await cachedRequest(cacheKey, 30000, () => quality === 'auto'
+      ? fetchPlayUrlFresh(vid, sid)
+      : require('./app-source').fetchAppPlayUrl(String(vid), { quality }), options);
   } catch (error) {
     return { url: null, spadeA: null, codec: null, error: error.message };
   }

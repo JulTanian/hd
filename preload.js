@@ -70,8 +70,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 播放器
   getSeriesEpisodes: (seriesId) => ipcRenderer.invoke('get-series-episodes', seriesId),
-  downloadSingleEpisode: (seriesId, vidIndex) =>
-    ipcRenderer.invoke('download-single-episode', seriesId, vidIndex),
+  downloadSingleEpisode: (seriesId, vidIndex, quality) =>
+    ipcRenderer.invoke('download-single-episode', seriesId, vidIndex, quality),
   savePlaybackPosition: (seriesId, vidIndex, currentTime) =>
     ipcRenderer.invoke('save-playback-position', seriesId, vidIndex, currentTime),
   getPlaybackPosition: (seriesId) => ipcRenderer.invoke('get-playback-position', seriesId),

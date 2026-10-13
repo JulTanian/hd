@@ -43,6 +43,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const [cacheNext, setCacheNext] = useState(true);
   const [cacheNextSaving, setCacheNextSaving] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [downloadQuality, setDownloadQuality] = useState('auto');
+  const [qualityLoading, setQualityLoading] = useState(true);
   const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -254,6 +256,18 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
       if (r && r.success) setCompatCache({ files: r.files, bytes: r.bytes });
     });
   }, [refreshCacheInfo]);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setQualityLoading(true);
+    window.electronAPI.getSettings().then((settings) => {
+      if (!cancelled) setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
+    }).catch(() => {
+      if (!cancelled) showToast('默认下载清晰度读取失败，请确认清晰度后再下载');
+    }).finally(() => { if (!cancelled) setQualityLoading(false); });
+    return () => { cancelled = true; };
+  }, [active]);
 
   useEffect(() => {
     if (!window.electronAPI.onTranscodeProgress) return undefined;
@@ -872,28 +886,35 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   };
 
   const downloadEpisode = async (vidIndex) => {
-    if (!episodes.some((ep) => ep.vid_index === vidIndex && !ep.locked)) return;
-    const res = await window.electronAPI.downloadSingleEpisode(activeSeriesId, vidIndex);
-    if (res && res.success) {
-      showToast(res.count > 0 ? `第 ${vidIndex} 集已加入下载队列` : `第 ${vidIndex} 集已在队列中`);
-      if (currentIndex === vidIndex) setWaitingFor(vidIndex);
-    } else {
-      showToast((res && res.error) || '加入下载失败');
-    }
+    if (qualityLoading || !episodes.some((ep) => ep.vid_index === vidIndex && !ep.locked)) return;
+    try {
+      const res = await window.electronAPI.downloadSingleEpisode(activeSeriesId, vidIndex, downloadQuality);
+      if (res && res.success) {
+        showToast(res.count > 0 ? `第 ${vidIndex} 集已加入下载队列` : `第 ${vidIndex} 集已在队列中`);
+        if (currentIndex === vidIndex) setWaitingFor(vidIndex);
+      } else {
+        showToast((res && res.error) || '加入下载失败');
+      }
+    } catch (error) { showToast(error.message || '加入下载失败，请重试'); }
   };
 
   const downloadMissing = async () => {
+    if (qualityLoading) return;
     const missing = episodes.filter((e) => !e.locked && e.status !== 'completed');
     if (!missing.length) {
       showToast('可下载的集数已全部下载');
       return;
     }
     let ok = 0;
+    let firstError = '';
     for (const ep of missing) {
-      const r = await window.electronAPI.downloadSingleEpisode(activeSeriesId, ep.vid_index);
-      if (r && r.success) ok++;
+      try {
+        const r = await window.electronAPI.downloadSingleEpisode(activeSeriesId, ep.vid_index, downloadQuality);
+        if (r?.success) ok++;
+        else if (!firstError) firstError = r?.error || '加入下载失败';
+      } catch (error) { if (!firstError) firstError = error.message || '加入下载失败'; }
     }
-    showToast(`已把 ${ok} 集加入下载队列`);
+    showToast(firstError ? `${ok} 集提交成功，${missing.length - ok} 集失败：${firstError}` : `已把 ${ok} 集加入下载队列`);
   };
 
   // 一键合并当前这部剧（弹出格式选择）
@@ -1020,7 +1041,17 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             <Trash2 size={15} />
             看完自动删 {autoDelete ? '开' : '关'}
           </button>
-          <button className="btn btn-outline" onClick={downloadMissing}>
+          <label className="player-download-quality">
+            <span>下载清晰度</span>
+            <select className="input-field" value={downloadQuality} disabled={qualityLoading}
+              aria-describedby="player-download-quality-hint"
+              onChange={(event) => setDownloadQuality(event.target.value)}>
+              <option value="auto">自动（兼容优先）</option>
+              <option value="1080p">1080P</option>
+              <option value="720p">720P</option>
+            </select>
+          </label>
+          <button className="btn btn-outline" onClick={downloadMissing} disabled={qualityLoading}>
             <Download size={15} />
             下载未完成集
           </button>
@@ -1033,6 +1064,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
             <Layers size={15} />
             {merging ? '提交中...' : '合并导出全集'}
           </button>
+          <p className="player-download-quality-hint" id="player-download-quality-hint">新建下载任务生效；所选清晰度不可用时提示，不自动降级。已有文件不自动删除或覆盖。</p>
         </div>
       </div>
 
@@ -1328,7 +1360,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
                     <Play size={15} />
                     在线播放（不下载）
                   </button>
-                  <button className="btn btn-outline" onClick={() => downloadEpisode(current.vid_index)}>
+                  <button className="btn btn-outline" disabled={qualityLoading} onClick={() => downloadEpisode(current.vid_index)}>
                     <Download size={15} />
                     下载本集
                   </button>

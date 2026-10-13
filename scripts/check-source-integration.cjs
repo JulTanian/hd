@@ -35,7 +35,7 @@ let failures=0;async function check(name,fn){if(process.argv[2]&&!name.includes(
  });
  await check('Hema detail and play routes never fall through to Hongguo',async()=>{
   const route={fetchEpisodeList:async id=>({series_id:id,source:'hema'}),fetchPlayUrlSingle:async(vid,sid)=>({vid,sid,source:'hema'})};
-  const m={exports:{}};const sandbox={module:m,exports:m.exports,require:n=>n==='./hema'?route:n==='axios'?{get:()=>{throw Error('wrong source')}}:req(n),Buffer,URL,console,process};
+  const m={exports:{}};const sandbox={module:m,exports:m.exports,require:n=>n==='./hema'?route:n==='axios'?{get:()=>{throw Error('wrong source')}}:req(n.startsWith('.')?path.join(__dirname,'../src/native',n):n),Buffer,URL,console,process};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/native/hongguo.js'),'utf8'),sandbox);
   assert.equal((await m.exports.fetchEpisodeList('hema:1')).source,'hema');
   assert.equal((await m.exports.fetchPlayUrlSingle('hema:1:2','hema:1')).source,'hema');

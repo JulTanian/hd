@@ -673,3 +673,7 @@
   max-height: none;
   transform: translateY(-50%);
 }
+
+.player-download-quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.player-download-quality .input-field { width: auto; max-width: 100%; min-height: 31px; padding: 5px 8px; font-size: 12px; }
+.player-download-quality-hint { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }

@@ -52,6 +52,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     require: name => {
       if (name === 'axios') return axios;
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
+      if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
         return crypto.createHash(name, ...args);
@@ -66,7 +67,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
 function nativeFixture() {
   const pending = [];
   const context = { module: { exports: {} }, Buffer, URL, process: { env: {} },
-    require: name => name === 'axios' ? { get: () => new Promise(resolve => pending.push(resolve)) } : require(name),
+    require: name => name === 'axios' ? { get: () => new Promise(resolve => pending.push(resolve)) } : require(name.startsWith('.') ? path.join(nativeDir, name) : name),
   };
   vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'hongguo.js'), 'utf8') + '\nmodule.exports.parseModelVideo = parseModelVideo;', context);
   return { ...context.module.exports, pending,

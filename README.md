@@ -21,9 +21,9 @@
   <a href="https://github.com/jackotom/hongguo-drama/issues">反馈问题</a>
 </p>
 
-**当前源码版本为 1.5（配置版本 1.5.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
+**当前源码版本为 1.6（配置版本 1.6.0）**，面向 **M 系列 Mac、Intel Mac 和 Windows x64**。红果、西饭、河马三来源统一搜索，支持播放、下载、追剧与合并导出。实际可下载版本以发行页为准。
 
-[下载 1.5 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.5) · [观看功能介绍](#13-完整功能介绍视频)
+[下载 1.6 正式版与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.6) · [观看功能介绍](#13-完整功能介绍视频)
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。软件不提供付费分集解锁，不承诺所有剧集可播放或下载。
 
@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/b95f4f60-b57c-495f-a30e-62ac2b0bda11
 视频使用 1.3 正式前端和隔离的演示资料；播放器画面为短剧封面演示，集数、榜单、评分、评论与日期不代表真实平台数据。
 
 [下载三分钟介绍视频（1080p，约6 MB）](https://github.com/jackotom/hongguo-drama/releases/download/v1.3/Hongguo-1.3-Complete-Intro-3min.mp4) ·
-[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.5)
+[下载软件与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.6)
 
 分享与推广请使用：[github.com/jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama)。
 
@@ -66,6 +66,14 @@ Mac 正式发行流程包含 Developer ID 签名、Apple 公证和票据装订�
 发行附件提供应用对应源码、各平台 FFmpeg/x264 对应源码和 `SHA256SUMS.txt`。不要把 GitHub 自动生成的 Source code ZIP 当成可直接运行的软件。
 
 仓库已从 `hongguo-drama-mac` 更名为 `hongguo-drama`，本页 1.2 安装包已修正更新地址。**已安装更名前 1.2 的用户，请手动下载替换一次**；应用标识和用户资料位置保持不变。修订精确源码见发行附件 `hongguo-drama-1.2-source.zip`，原 `v1.2` 标签保留首发历史。
+
+## 1.6 下载清晰度
+
+- 下载时可选 **自动（兼容优先）/ 1080P / 720P**；支持搜索选集、播放器单集与未完成集，也可在设置保存默认值。
+- 显式选择按视频实际尺寸筛选片源，文件保存前再次验证分辨率；没有满足要求的片源就提示，不静默降级。若仅有更高分辨率，保留更高分辨率，不做放大或降采样。
+- 每个下载任务保存所选清晰度；之后修改默认值不改变已有任务的普通重试。已有本地低清文件保留并提示，不自动覆盖。
+- 片源的“1080P”标签不一定准确。已抽样核实存在 1080×1920 片源，也发现标为1080P但实际720×1280的分集；不能保证每部剧或每一集都有1080P。分辨率检测不代表能确认上游拍摄或母版质量。
+- “自动”保留既有兼容优先策略；本次选项仅改变下载，不改变在线播放清晰度。Windows EXE 仍未签名。
 
 ## 1.5 修复
 

@@ -17,6 +17,8 @@ function HongguoDownload({ onNavigate, active = true }) {
   const [selectedVids, setSelectedVids] = useState(new Set());
   const [rangeInput, setRangeInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [downloadQuality, setDownloadQuality] = useState('auto');
+  const [qualityLoading, setQualityLoading] = useState(true);
   const [openingPlayer, setOpeningPlayer] = useState(false);
   const playPending = useRef(false);
   const firstPlayable = seriesData?.episodes.find((ep) => !ep.locked);
@@ -25,6 +27,18 @@ function HongguoDownload({ onNavigate, active = true }) {
   const searchVersion = resolveRequest.current;
 
   useEffect(() => () => { resolveRequest.current++; }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setQualityLoading(true);
+    window.electronAPI.getSettings().then((settings) => {
+      if (!cancelled) setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
+    }).catch(() => {
+      if (!cancelled) setErrorMsg('默认下载清晰度读取失败，请确认清晰度后再下载');
+    }).finally(() => { if (!cancelled) setQualityLoading(false); });
+    return () => { cancelled = true; };
+  }, [active]);
 
   const switchTab = (next) => {
     if (next === tab) return;
@@ -178,6 +192,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         seriesId: seriesData.series_id,
         seriesTitle: seriesData.series_title,
         episodes: selectedEps,
+        quality: downloadQuality,
       });
       if (res.success) {
         setSuccessMsg(`已成功将 ${res.count} 集提交至下载队列！点击下方按钮跳转至“下载管理”查看实时进度。`);
@@ -315,10 +330,20 @@ function HongguoDownload({ onNavigate, active = true }) {
                 {openingPlayer ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
                 <span>{openingPlayer ? '正在打开…' : '立即播放'}</span>
               </button>
+              <label className="batch-quality-control">
+                <span>下载清晰度</span>
+                <select className="input-field" value={downloadQuality}
+                  aria-describedby="batch-quality-hint" disabled={qualityLoading || submitting}
+                  onChange={(event) => setDownloadQuality(event.target.value)}>
+                  <option value="auto">自动（兼容优先）</option>
+                  <option value="1080p">1080P</option>
+                  <option value="720p">720P</option>
+                </select>
+              </label>
               <button
                 className="btn btn-primary"
                 onClick={handleBatchDownload}
-                disabled={submitting || selectedVids.size === 0}
+                disabled={qualityLoading || submitting || selectedVids.size === 0}
               >
                 <Download size={16} />
                 <span>下载选中集数 ({selectedVids.size}/{seriesData.total})</span>
@@ -331,6 +356,8 @@ function HongguoDownload({ onNavigate, active = true }) {
               )}
             </div>
           </div>
+
+          <p className="settings-hint batch-quality-hint" id="batch-quality-hint">新建下载任务生效；所选清晰度不可用时提示，不自动降级。已有文件不自动删除或覆盖。</p>
 
           {seriesData.web_accessible_episodes != null && seriesData.web_accessible_episodes < seriesData.total && (
             <p className="settings-hint">网页源提供前 {seriesData.web_accessible_episodes} 集，后续集数自动尝试 App 片源。</p>

@@ -151,6 +151,35 @@ async function keyHandoff(key, code, expectedSource) {
   assert.equal(hash(media.ffmpeg), hash(ffmpeg)); assert.equal(hash(media.ffprobe), hash(ffprobe));
   assert.notEqual(media.ffmpeg, ffmpeg, 'Must run the self-extracted portable EXE, not win-unpacked');
   result.checks.push('Single-file portable EXE opens; matching version; isolated profile; extracted media matches payload');
+  const qualityUi = await evaluate(`(async () => {
+    const waitFor = async (check) => {
+      for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(r => setTimeout(r, 50)); }
+      throw new Error('Download quality settings UI did not reach the expected state');
+    };
+    [...document.querySelectorAll('.sidebar-item')].find(b => b.textContent.trim() === '设置').click();
+    await waitFor(() => document.querySelector('#default-download-quality'));
+    const select = document.querySelector('#default-download-quality');
+    const initial = select.value;
+    const options = [...select.options].map(o => ({ value: o.value, label: o.textContent }));
+    select.value = '1080p'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor(() => document.querySelector('.settings-footer [role="status"]'));
+    document.querySelector('.settings-footer button').click();
+    await waitFor(() => document.querySelector('.settings-footer button').textContent.includes('已保存'));
+    const saved = (await window.electronAPI.getSettings()).download_quality;
+    return { initial, options, saved };
+  })()`);
+  assert.deepEqual(qualityUi, { initial: 'auto', options: [
+    { value: 'auto', label: '自动（兼容优先）' }, { value: '1080p', label: '1080P' }, { value: '720p', label: '720P' },
+  ], saved: '1080p' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(profile, 'data.json'), 'utf8')).settings.download_quality, '1080p');
+  const qualityScreenshot = await cdp('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(out, 'portable-windows-download-quality.png'), Buffer.from(qualityScreenshot.data, 'base64'));
+  assert.equal((await evaluate(`(async () => {
+    const current = await window.electronAPI.getSettings();
+    return window.electronAPI.saveSettings({ ...current, download_quality: 'auto' });
+  })()`)).success, true);
+  result.downloadQuality = { ...qualityUi, persistedToIsolatedProfile: true, restoredDefault: 'auto', realPlatformDownloadTested: false };
+  result.checks.push('Actual single-file EXE: download quality settings offer auto/1080p/720p; UI saves 1080p to isolated profile; default restored without platform download');
   assert.equal((await evaluate('window.electronAPI.setWindowLayout("portrait")')).success, true);
   assert.equal(await evaluate('window.electronAPI.getWindowLayout()'), 'portrait');
   assert.equal(await evaluate('window.electronAPI.setAlwaysOnTop(true)'), true);

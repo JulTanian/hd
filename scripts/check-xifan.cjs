@@ -67,7 +67,7 @@ async function check() {
   assert.equal((await xifan.fetchPlayUrlSingle('123', sid)).url, null);
   await assert.rejects(xifan.fetchEpisodeList('xifan:huabo:../outside'));
   const nativeContext = { module: { exports: {} }, Buffer, process: { env: {} },
-    require: name => name === './xifan' ? xifan : name === 'axios' ? { get: () => { throw Error('西饭不得回退红果'); } } : require(name), console };
+    require: name => name === './xifan' ? xifan : name === 'axios' ? { get: () => { throw Error('西饭不得回退红果'); } } : require(name.startsWith('.') ? path.join(__dirname, '../src/native', name) : name), console };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/native/hongguo.js'), 'utf8'), nativeContext);
   assert.equal((await nativeContext.module.exports.fetchEpisodeList(sid)).source, 'xifan');
   assert.equal((await nativeContext.module.exports.fetchPlayUrlSingle(`${sid}:episode2`, sid)).locked, true);

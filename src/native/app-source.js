@@ -7,6 +7,7 @@
 // Crypto tables and SDK protocol constants below are not user credentials.
 const crypto = require('node:crypto');
 const sm3 = require('./sm3');
+const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
@@ -218,7 +219,8 @@ async function requestJson(url, options, deadline, signal) {
     throw new Error('App 片源跳转次数过多');
 }
 
-async function fetchAppPlayUrl(vid) {
+async function fetchAppPlayUrl(vid, options = {}) {
+    const requestedQuality = normalizeDownloadQuality(options.quality);
     vid = String(vid || '');
     if (!/^\d{1,30}$/.test(vid)) throw new Error('分集编号无效');
     const deadline = Date.now() + 12000;
@@ -242,9 +244,16 @@ async function fetchAppPlayUrl(vid) {
         const codecRank = ['h264', 'avc', 'avc1'].includes(codec) ? 0 : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(codec) ? 1 : 2;
         const quality = str(item.quality_desc || item.definition || item.height || item.vheight || item.video_meta?.definition);
         const pixels = Number(quality.match(/\d+/)?.[0] || 0);
-        return { item, codec, codecRank, quality, pixels };
-    }).filter(row => row.codecRank < 2).sort((a, b) => a.codecRank - b.codecRank || b.pixels - a.pixels);
-    if (!rows.length) throw new Error('本集暂未提供兼容的 H.264/HEVC 片源');
+        const meta = item.video_meta || {};
+        const [width, height] = [[item.vwidth, item.vheight], [item.width, item.height], [meta.vwidth, meta.vheight], [meta.width, meta.height]]
+            .map(pair => pair.map(Number)).find(pair => pair.every(value => Number.isFinite(value) && value > 0)) || [0, 0];
+        return { item, codec, codecRank, quality, pixels, width, height };
+    }).filter(row => row.codecRank < 2 && meetsDownloadQuality(row, requestedQuality)).sort((a, b) => requestedQuality === 'auto'
+        ? a.codecRank - b.codecRank || b.pixels - a.pixels
+        : Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank);
+    if (!rows.length) throw new Error(requestedQuality === 'auto'
+        ? '本集暂未提供兼容的 H.264/HEVC 片源'
+        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级下载`);
     let lastError;
     for (const selected of rows) {
         try {
@@ -257,7 +266,8 @@ async function fetchAppPlayUrl(vid) {
                         ? decryptSpadeUrl(candidate, Buffer.from(info.key_seed, 'base64'))
                         : cleanUrl(candidate);
                     const url = checkedUrl(media, ['qznovelvod.com', 'fqnovelvod.com', 'douyinvod.com']);
-                    return { url, contentKey: key ? key.toString('hex') : null, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', quality: selected.quality };
+                    return { url, contentKey: key ? key.toString('hex') : null, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', quality: requestedQuality === 'auto' ? selected.quality : requestedQuality,
+                        ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) };
                 } catch (error) { lastError = error; }
             }
         } catch (error) { lastError = error; }
