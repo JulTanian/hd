@@ -16,8 +16,8 @@
 .player-controls input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .player-controls input:disabled { cursor: default; }
 .player-controls-seek { display: block; width: 100%; height: 18px; margin: 0 0 2px; }
-.player-controls-time { margin-right: auto; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
-.player-controls-volume { display: flex; align-items: center; gap: 2px; }
+.player-controls-time { white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.player-controls-volume { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .player-controls-volume input { width: 72px; }
 .player-controls-options { position: relative; }
 .player-controls-rate { font-size: 12px; font-variant-numeric: tabular-nums; }
