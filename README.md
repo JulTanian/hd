@@ -197,9 +197,9 @@
 
 ## 界面与演示
 
-![发现短剧：分类、题材与海报目录](docs/screenshots/macos-browse.png)
+![红果短剧 1.6：热播推荐与公开榜单](docs/screenshots/macos-v1.6-hot.jpg)
 
-<p align="center"><sub>历史实拍：v1.1.3 红果来源目录；当前功能以本文和应用为准。</sub></p>
+<p align="center"><sub>macOS 1.6 正式版实拍：热播推荐页面。截图中的片单与热度为截取时的公开榜单内容，会随来源更新。</sub></p>
 
 <details>
 <summary>观看 3 分钟功能介绍（基于 1.3，未包含后续更新）</summary>
