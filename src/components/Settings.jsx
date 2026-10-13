@@ -183,8 +183,11 @@ function SettingsPage({ active = true, preview = false }) {
       <p className="settings-hint">播放页顶部可开启隐身小窗。鼠标移开时暂停隐藏，移回继续；Esc 或 Dock 可恢复主窗口。</p>
       <fieldset className="settings-card" disabled={saving}>
         <div className="settings-group">
-          <span className="settings-label">播放器</span>
+          <span className="settings-label">弹幕按钮设置</span>
+          <div className="settings-inline-save">
           <label className="proxy-switch-row"><input type="checkbox" aria-label="显示弹幕按钮" checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">显示弹幕按钮<em>保存后生效。关闭时隐藏弹幕及弹幕设置按钮，并停用评论弹幕；再次开启会恢复原有弹幕偏好。</em></span></label>
+            <button type="button" className="btn btn-primary" aria-label="保存当前设置" onClick={save}>{saving ? '保存中…' : saved ? '已保存' : '保存'}</button>
+          </div>
         </div>
         <div className="settings-group">
           <label className="settings-label">下载目录</label>
