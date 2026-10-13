@@ -85,7 +85,7 @@ const MODEL_BIZ_PARAM = {
 /**
  * API 调用封装
  */
-async function apiCall(apiPath, body, retries = 3) {
+async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
   const q = { ...COMMON_QUERY, _rticket: Date.now().toString() };
   for (let i = 0; i < retries; i++) {
     const signal = {}; // 供错误信息回溯（HTTP 状态 / 字节数 / CDN logid）
@@ -93,7 +93,7 @@ async function apiCall(apiPath, body, retries = 3) {
       const res = await axios.post(API + apiPath, body, {
         params: q,
         headers: HEADERS,
-        timeout: 25000,
+        timeout,
         // 200 + 空 body 时 axios 会解析成 ''，这里统一按原始字节处理便于判断
         responseType: 'arraybuffer',
         transformResponse: [(d) => d],
@@ -182,7 +182,7 @@ function pickJsonString(text, key) {
 }
 
 /** 拉取官网页面 HTML */
-async function fetchSiteHtml(url) {
+async function fetchSiteHtml(url, timeout = 30000) {
   const res = await axios.get(url, {
     headers: {
       'User-Agent': WEB_UA,
@@ -190,7 +190,7 @@ async function fetchSiteHtml(url) {
       'Accept-Language': 'zh-CN,zh;q=0.9',
       'Referer': WEB_REFERER,
     },
-    timeout: 30000,
+    timeout,
     responseType: 'text',
     maxRedirects: 5,
   });
@@ -241,7 +241,7 @@ async function fetchEpisodeListFromWeb(seriesId) {
 
 /**
  * 从官网取单集可直接下载的 MP4 直链
- * 官网页里内嵌的 main_url 是「已经可播」的地址，明文 MP4，无 CENC 加密，
+ * 官网页里与当前分集绑定的 VideoObject.contentUrl 是明文 MP4，无 CENC 加密，
  * 因此不需要 spade_a / 解密这一步。
  * sid 已知时用 /player/{sid}/{vid}；未知时退回 /player/_/{vid} 再自行解析。
  */
@@ -253,14 +253,33 @@ async function fetchPlayUrlFromWeb(vid, sid) {
   let lastErr = null;
   for (const url of candidates) {
     try {
-      const html = await fetchSiteHtml(url);
-      let m = html.match(/"main_url"\s*:\s*"([^"]+)"/);
-      if (!m) m = html.match(/"contentUrl"\s*:\s*"([^"]+)"/);
-      if (!m) continue;
-
-      const videoUrl = normalizeVideoUrl(m[1]);
-      if (!/^https?:\/\//i.test(videoUrl)) continue;
-      return { url: videoUrl, spadeA: null, codec: '', source: 'web', vid: String(vid) };
+      const html = await fetchSiteHtml(url, 4000);
+      const router = require('./catalog').readRouterData(html);
+      const data = router.loaderData?.['player_(series_id)/(vid)/page'];
+      const actualSid = String(data?.series_id || '');
+      if (!data || data.isSuccess === false || String(data.vid) !== String(vid) || !/^\d+$/.test(actualSid) ||
+          (sid && actualSid !== String(sid)) || String(data.seriesDetail?.series_id) !== actualSid ||
+          data.publicVideoSeo?.available !== true || String(data.publicVideoSeo.itemId) !== String(vid) ||
+          String(data.publicVideoSeo.seriesId) !== actualSid) continue;
+      // Bind media to the current player, never a recommended video's URL elsewhere in the page.
+      const matchesPlayer = value => {
+        try {
+          const target = new URL(value);
+          return target.origin === SITE_ORIGIN && !target.username && !target.password &&
+            target.pathname === `/player/${actualSid}/${String(vid)}`;
+        } catch (_) { return false; }
+      };
+      for (const script of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+        if (!/\btype\s*=\s*["']application\/ld\+json["']/i.test(script[1])) continue;
+        let video;
+        try { video = JSON.parse(script[2]); } catch (_) { continue; }
+        if (video?.['@type'] !== 'VideoObject' || !matchesPlayer(video.url) ||
+            (video['@id'] && !matchesPlayer(video['@id']))) continue;
+        let videoUrl;
+        try { videoUrl = new URL(normalizeVideoUrl(video.contentUrl)); } catch (_) { continue; }
+        if (!['https:', 'http:'].includes(videoUrl.protocol) || videoUrl.username || videoUrl.password) continue;
+        return { url: videoUrl.href, spadeA: null, codec: '', source: 'web', vid: String(vid), userAgent: WEB_UA, referer: WEB_REFERER };
+      }
     } catch (e) {
       lastErr = e;
     }
@@ -479,22 +498,46 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
     if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
     const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();
     const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}`;
-    return await cachedRequest(cacheKey, 30000, () => quality === 'auto'
+    const result = await cachedRequest(cacheKey, 30000, () => quality === 'auto'
       ? fetchPlayUrlFresh(vid, sid, skipWeb)
-      : require('./app-source').fetchAppPlayUrl(String(vid), { quality }), options);
+      : require('./app-source').fetchAppPlayUrl(String(vid), { quality }).catch(error => {
+        throw unavailableSources([sourceFailure('app', error)], quality);
+      }), options);
+    // Last-resort web recovery must not replace App priority during the penalty window.
+    if (skipWeb && result.source === 'web' && responseCache.get(cacheKey)?.value === result) responseCache.delete(cacheKey);
+    return result;
   } catch (error) {
-    return { url: null, spadeA: null, codec: null, error: error.message };
+    return { url: null, spadeA: null, codec: null, error: error.message,
+      ...(error.code === 'SOURCE_UNAVAILABLE' ? { code: error.code, sources: error.sources } : {}) };
   }
 }
 
+function sourceFailure(source, error) {
+  const status = Number(error?.response?.status || String(error?.message || '').match(/HTTP\s+(\d{3})/)?.[1]);
+  if (status >= 400 && status <= 599) return { source, code: `HTTP_${status}`, message: `请求失败（HTTP ${status}）` };
+  if (/超时|timeout/i.test(String(error?.message || ''))) return { source, code: 'TIMEOUT', message: '请求超时' };
+  if (/空响应|有效数据|JSON/.test(String(error?.message || ''))) return { source, code: 'INVALID_RESPONSE', message: '接口未返回有效数据' };
+  return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };
+}
+
+function unavailableSources(sources, quality = 'auto') {
+  const names = { web: '网页', app: 'App', api: '旧接口' };
+  const error = new Error(`本集取源失败${quality === 'auto' ? '' : `（所选清晰度 ${quality}，未降级）`}：${sources.map(item => `${names[item.source]}：${item.message}`).join('；')}。请重试或在官方 App 确认可播情况。`);
+  error.code = 'SOURCE_UNAVAILABLE';
+  error.sources = sources;
+  return error;
+}
+
 async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
+  const sources = [];
   const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid);
   if (web && web.url) return web;
+  if (!skipWeb) sources.push(sourceFailure('web'));
 
   try {
     return await require('./app-source').fetchAppPlayUrl(String(vid));
-  } catch (_) {
-    // 保留旧接口回退；取址错误不可包含签名地址或媒体密钥。
+  } catch (error) {
+    sources.push(sourceFailure('app', error));
   }
 
   const body = {
@@ -503,25 +546,21 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
     mixed_video_id_map: { "1004": [vid] },
   };
   try {
-    const j = await apiCall("/novel/player/multi_video_model/preload/v1", body);
+    const j = await apiCall("/novel/player/multi_video_model/preload/v1", body, 1, 6000);
     const item = j?.data?.[vid] || {};
     const [url, spadeA, codec] = parseModelVideo(item.video_model);
-    if (url) return { url, spadeA, codec, source: 'api' };
+    if (url) return { url, spadeA, codec, source: 'api', vid: String(vid), userAgent: UA, referer: VIDEO_REFERER };
+    sources.push(sourceFailure('api'));
   } catch (e) {
-    // 调用层继续沿用无地址返回；此失败不会进入缓存。
+    sources.push(sourceFailure('api', e));
   }
-  // 旧剧库可能没有网页可用范围；仅在取地址失败后补查，不拖慢正常播放。
-  if (sid) {
-    let series;
-    try { series = await cachedRequest(`episodes:${sid}`, 60000, () => fetchEpisodeListFromWeb(sid)); } catch (_) {}
-    const index = series?.episodes.findIndex(episode => episode.vid === String(vid));
-    const accessible = series?.web_accessible_episodes;
-    if (Number.isInteger(accessible) && index >= accessible) {
-      const range = accessible > 0 ? `仅提供前 ${accessible} 集` : '暂未提供可播放分集';
-      throw new Error(`官网网页当前${range}，第 ${index + 1} 集暂无可用播放地址；请在官方 App 确认可播情况。`);
-    }
+  // A transient CDN failure changes priority, not permanent source availability.
+  if (skipWeb) {
+    const lastWeb = await fetchPlayUrlFromWeb(vid, sid);
+    if (lastWeb?.url) return lastWeb;
+    sources.push(sourceFailure('web'));
   }
-  throw new Error('官网与备用接口均未提供有效播放地址，请稍后重试');
+  throw unavailableSources(sources);
 }
 
 /**

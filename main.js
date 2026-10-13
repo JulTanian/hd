@@ -591,55 +591,55 @@ async function executeHongguoDownload(task) {
       saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
       return;
     }
-    const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(vid, hongguoInfo?.series_id, { quality });
-    source.token.throwIfRequested();
-    if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
     tmpPath = finalPath + '.enc.tmp';
-    const response = await requestMedia(playInfo, { cancelToken: source.token });
-    source.token.throwIfRequested();
-    const totalLength = Number(response.headers['content-length']) || 0;
-    task.totalBytes = totalLength;
-    writer = fs.createWriteStream(tmpPath); task.writer = writer;
-    let received = 0, lastProgress = 0;
-    response.data.on('data', chunk => {
-      received += chunk.length; task.receivedBytes = received;
-      task.progress = totalLength ? Math.min(99, Math.floor(received / totalLength * 100)) : 0;
-      if (Date.now() - lastProgress >= 150 || received === totalLength) {
-        sendToRenderer('download-progress', { id, progress: task.progress, receivedBytes: received, totalBytes: totalLength });
-        lastProgress = Date.now();
+    await withMediaRecovery(vid, hongguoInfo?.series_id, { playInfo: checkedPlayInfo, quality, force: true, cancelToken: source.token }, async playInfo => {
+      source.token.throwIfRequested();
+      const response = await requestMedia(playInfo, { cancelToken: source.token });
+      source.token.throwIfRequested();
+      const totalLength = Number(response.headers['content-length']) || 0;
+      task.totalBytes = totalLength;
+      writer = fs.createWriteStream(tmpPath); task.writer = writer;
+      let received = 0, lastProgress = 0;
+      response.data.on('data', chunk => {
+        received += chunk.length; task.receivedBytes = received;
+        task.progress = totalLength ? Math.min(99, Math.floor(received / totalLength * 100)) : 0;
+        if (Date.now() - lastProgress >= 150 || received === totalLength) {
+          sendToRenderer('download-progress', { id, progress: task.progress, receivedBytes: received, totalBytes: totalLength });
+          lastProgress = Date.now();
+        }
+      });
+      // pipeline rejects on either side and destroys both streams (including abrupt CDN close).
+      await pipeline(response.data, writer);
+      source.token.throwIfRequested();
+      if (!received || (totalLength && received !== totalLength)) throw mediaTransferError('视频下载不完整，请重试');
+      if (playInfo.contentKey) {
+        const decodedPath = tmpPath + '.decoded';
+        try {
+          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
+          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          source.token.throwIfRequested();
+          fs.renameSync(decodedPath, finalPath);
+        } finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
+        fs.unlinkSync(tmpPath);
+      } else if (playInfo.spadeA) {
+        const key = hongguo.deriveKey(playInfo.spadeA);
+        if (!key) throw new Error('Key 派生失败');
+        // Decrypt to another temporary file; never expose partial data as a completed MP4.
+        const decodedPath = tmpPath + '.decoded';
+        try {
+          await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
+          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          source.token.throwIfRequested();
+          fs.renameSync(decodedPath, finalPath);
+        }
+        finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
+        fs.unlinkSync(tmpPath);
+      } else {
+        task.actualQuality = await verifyDownloadQuality(tmpPath, quality);
+        source.token.throwIfRequested();
+        fs.renameSync(tmpPath, finalPath);
       }
     });
-    // pipeline rejects on either side and destroys both streams (including abrupt CDN close).
-    await pipeline(response.data, writer);
-    source.token.throwIfRequested();
-    if (!received || (totalLength && received !== totalLength)) throw new Error('视频下载不完整，请重试');
-    if (playInfo.contentKey) {
-      const decodedPath = tmpPath + '.decoded';
-      try {
-        await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
-        task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
-        source.token.throwIfRequested();
-        fs.renameSync(decodedPath, finalPath);
-      } finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
-      fs.unlinkSync(tmpPath);
-    } else if (playInfo.spadeA) {
-      const key = hongguo.deriveKey(playInfo.spadeA);
-      if (!key) throw new Error('Key 派生失败');
-      // Decrypt to another temporary file; never expose partial data as a completed MP4.
-      const decodedPath = tmpPath + '.decoded';
-      try {
-        await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
-        task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
-        source.token.throwIfRequested();
-        fs.renameSync(decodedPath, finalPath);
-      }
-      finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
-      fs.unlinkSync(tmpPath);
-    } else {
-      task.actualQuality = await verifyDownloadQuality(tmpPath, quality);
-      source.token.throwIfRequested();
-      fs.renameSync(tmpPath, finalPath);
-    }
     task.status = 'completed'; task.progress = 100; task.endTime = Date.now();
     saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
   } catch (error) {
@@ -1566,8 +1566,8 @@ async function requestMedia(playInfo, options = {}) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('无效播放地址');
   const web = playInfo.source === 'web';
   const config = { method: 'GET', url: url.href, responseType: 'stream', timeout: 60000, ...options,
-    headers: { 'User-Agent': web ? hongguo.WEB_UA : hongguo.UA, 'Accept-Encoding': 'identity',
-      ...(web ? { Referer: hongguo.WEB_REFERER } : {}), ...options.headers } };
+    headers: { 'User-Agent': playInfo.userAgent || (web ? hongguo.WEB_UA : hongguo.UA), 'Accept-Encoding': 'identity',
+      ...((playInfo.referer || web) ? { Referer: playInfo.referer || hongguo.WEB_REFERER } : {}), ...options.headers } };
   let response;
   for (let attempt = 0; attempt < 2; attempt++) {
     try { response = await axios(config); break; }
@@ -1577,27 +1577,116 @@ async function requestMedia(playInfo, options = {}) {
       const cancelled = config.signal?.aborted || config.cancelToken?.reason || axios.isCancel(error);
       const retryable = web ? [404, 410].includes(status) || status >= 500 && status <= 599 : status === 403;
       if (!cancelled && attempt === 0 && retryable) {
-        if (!web) config.headers.Referer = hongguo.VIDEO_REFERER;
+        if (!web && !config.headers.Referer) config.headers.Referer = hongguo.VIDEO_REFERER;
         continue;
       }
       if (!cancelled && config.method === 'GET' && (retryable || status === 403)) hongguo.markWebMediaFailure?.(playInfo);
-      if (!cancelled && status) throw new Error(`片源请求失败（HTTP ${status}），请重新连接片源`);
+      if (!cancelled && status) {
+        const failure = new Error(`片源请求失败（HTTP ${status}），请重新连接片源`);
+        failure.mediaRetryable = [403, 404, 408, 410].includes(status) || status >= 500 && status <= 599;
+        throw failure;
+      }
       throw error;
     }
   }
   if ([200, 206].includes(response.status) && /(?:text\/html|application\/json)/i.test(response.headers['content-type'] || '')) {
     response.data.destroy();
-    throw new Error('片源返回了错误页面，请重新获取片源');
+    throw mediaTransferError('片源返回了错误页面，请重新获取片源');
   }
   if (config.method === 'GET' && !config.headers.Range && response.status === 206) {
     const range = /^bytes 0-(\d+)\/(\d+)$/.exec(response.headers['content-range'] || '');
     if (!range || Number(range[1]) + 1 !== Number(range[2])) {
       response.data.destroy();
-      throw new Error('视频响应不完整，请重新获取片源');
+      throw mediaTransferError('视频响应不完整，请重新获取片源');
     }
     response.headers['content-length'] = range[2];
   }
   return response;
+}
+
+function mediaTransferError(message) {
+  return Object.assign(new Error(message), { mediaRetryable: true });
+}
+
+function awaitMediaOperation(promise, signal, timeout = 0) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const finish = (settle, value) => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort); settle(value);
+    };
+    const abort = () => finish(reject, Object.assign(new Error('已取消媒体请求'), { code: 'ERR_CANCELED' }));
+    if (timeout) timer = setTimeout(() => finish(reject, mediaTransferError('获取片源超时，请稍后重试')), timeout);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    // The shared provider may finish later; only this consumer's wait is cancelled.
+    Promise.resolve(promise).then(value => finish(resolve, value), error => finish(reject, error));
+  });
+}
+
+/** Retry the complete operation so a broken body never counts as a successful download. */
+async function withMediaRecovery(vid, seriesId, options, consume) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  options.cancelToken?.subscribe(abort);
+  const cancelled = () => {
+    options.cancelToken?.throwIfRequested();
+    if (options.signal?.aborted || controller.signal.aborted) throw Object.assign(new Error('已取消媒体请求'), { code: 'ERR_CANCELED' });
+  };
+  const recoverable = error => error?.mediaRetryable || error?.code === 'SOURCE_UNAVAILABLE'
+    || ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'ERR_BAD_RESPONSE', 'ERR_STREAM_PREMATURE_CLOSE', 'EAI_AGAIN'].includes(error?.code);
+  const rounds = options.recover !== false && /^\d{1,30}$/.test(String(vid)) ? 3 : 1;
+  let lastError, transfers = 0;
+  try {
+    for (let round = 0; round < rounds; round++) {
+      cancelled();
+      if (round) {
+        let timer;
+        try { await awaitMediaOperation(new Promise(resolve => { timer = setTimeout(resolve, round * 500); }), controller.signal); }
+        finally { clearTimeout(timer); }
+      }
+      cancelled();
+      let info;
+      try {
+        info = !round && options.playInfo || await awaitMediaOperation(hongguo.fetchPlayUrlSingle(vid, seriesId,
+          { quality: options.quality, force: options.force || round > 0 }), controller.signal, 30000);
+      } catch (error) {
+        cancelled();
+        if (!recoverable(error)) throw error;
+        lastError = error;
+        continue;
+      }
+      cancelled();
+      if (!info?.url) {
+        lastError = Object.assign(new Error(info?.error || '未获取到有效播放地址'), { code: info?.code });
+        if (!recoverable(lastError) || info?.locked) throw lastError;
+        continue;
+      }
+      const seen = new Set();
+      for (const candidate of [info, ...(options.recover === false ? [] : info.variants || [])]) {
+        const identity = JSON.stringify([candidate.url, candidate.contentKey, candidate.spadeA, candidate.userAgent, candidate.referer]);
+        if (!candidate.url || seen.has(identity)) continue;
+        seen.add(identity);
+        cancelled();
+        transfers++;
+        try {
+          const value = await consume(candidate);
+          cancelled();
+          return value;
+        } catch (error) {
+          cancelled();
+          if (!recoverable(error)) throw error;
+          lastError = error;
+          hongguo.markWebMediaFailure?.(candidate);
+          if (transfers >= 4) throw lastError;
+        }
+      }
+    }
+    throw lastError;
+  } finally {
+    options.signal?.removeEventListener('abort', abort);
+    options.cancelToken?.unsubscribe(abort);
+  }
 }
 
 /** Proxy only addresses resolved by our native provider, never renderer-supplied URLs. */
@@ -1620,7 +1709,10 @@ function registerStreamProtocol() {
     if (!['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 405 });
     const entry = session.entry;
     entry.lastUsed = Date.now();
-    if (entry.buffer) return bufferedMediaResponse(request, entry.buffer);
+    if (entry.buffer) {
+      if (session.mediaStarted && entry.mediaIdentity && session.mediaIdentity !== entry.mediaIdentity) return new Response('media changed', { status: 502 });
+      return bufferedMediaResponse(request, entry.buffer);
+    }
     const range = request.headers.get('range');
     if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return new Response(null, { status: 416 });
     const controller = new AbortController();
@@ -1630,18 +1722,44 @@ function registerStreamProtocol() {
     if (request.signal.aborted) abort();
     const cleanup = () => { session.requests.delete(controller); request.signal.removeEventListener('abort', abort); };
     try {
-      const upstream = await requestMedia(entry.playInfo, { method: request.method, signal: controller.signal,
-        headers: range ? { Range: range } : {}, validateStatus: status => [200, 206, 416].includes(status) });
-      upstream.data.once('close', cleanup);
-      const headers = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' };
-      for (const name of ['content-length', 'content-range', 'accept-ranges']) {
-        if (upstream.headers[name]) headers[name] = upstream.headers[name];
-      }
-      if (request.method === 'HEAD' || upstream.status === 416) {
-        upstream.data.destroy(); cleanup();
-        return new Response(null, { status: upstream.status, headers });
-      }
-      return new Response(Readable.toWeb(upstream.data, { strategy: { highWaterMark: 64 * 1024, size: chunk => chunk.byteLength } }), { status: upstream.status, headers });
+      return await withMediaRecovery(session.vid, entry.seriesId,
+        { playInfo: entry.playInfo, signal: controller.signal, recover: !session.mediaStarted }, async playInfo => {
+        const identity = JSON.stringify([playInfo.url, playInfo.contentKey, playInfo.spadeA]);
+        const checkIdentity = () => {
+          if (session.mediaStarted && session.mediaIdentity !== identity) throw new Error('片源已变化，请重新连接播放');
+        };
+        checkIdentity();
+        // A fallback can change encryption and size; serve Range only after decoding that candidate.
+        if (playInfo.spadeA || playInfo.contentKey) {
+          const buffer = await fetchDecryptedEpisodeOnce(session.vid, null, entry.seriesId, playInfo, controller.signal);
+          checkIdentity();
+          entry.buffer = buffer; entry.size = buffer.length; entry.mediaIdentity = identity; delete entry.playInfo;
+          session.mediaStarted = true; session.mediaIdentity = identity;
+          cleanup();
+          return bufferedMediaResponse(request, buffer);
+        }
+        const upstream = await requestMedia(playInfo, { method: request.method, signal: controller.signal,
+          headers: range ? { Range: range } : {}, validateStatus: status => [200, 206, 416].includes(status) });
+        try { checkIdentity(); } catch (error) { upstream.data.destroy(); throw error; }
+        entry.playInfo = playInfo;
+        upstream.data.once('error', () => {
+          if (!controller.signal.aborted) hongguo.markWebMediaFailure?.(playInfo);
+        });
+        upstream.data.once('close', cleanup);
+        const headers = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' };
+        for (const name of ['content-length', 'content-range', 'accept-ranges']) {
+          if (upstream.headers[name]) headers[name] = upstream.headers[name];
+        }
+        if (request.method === 'HEAD' || upstream.status === 416) {
+          if (request.method === 'HEAD' && upstream.status !== 416) { session.mediaStarted = true; session.mediaIdentity = identity; }
+          upstream.data.destroy(); cleanup();
+          return new Response(null, { status: upstream.status, headers });
+        }
+        // Later requests must reconnect by playback time, never reuse offsets against a new rendition.
+        session.mediaStarted = true;
+        session.mediaIdentity = identity;
+        return new Response(Readable.toWeb(upstream.data, { strategy: { highWaterMark: 64 * 1024, size: chunk => chunk.byteLength } }), { status: upstream.status, headers });
+      });
     } catch (error) {
       cleanup();
       return new Response('media unavailable', { status: controller.signal.aborted ? 499 : 502 });
@@ -1762,7 +1880,11 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
 
 /** Encrypted sources and compatibility transcoding still require the complete MP4. */
 async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity, force = false) {
-  playInfo = playInfo || await hongguo.fetchPlayUrlSingle(vid, seriesId, { force });
+  return withMediaRecovery(vid, seriesId, { playInfo, signal, force }, candidate =>
+    fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, candidate, signal, maxBytes));
+}
+
+async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity) {
   if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
   if (signal?.aborted) throw new Error('已取消播放');
   if (playInfo.contentKey && !/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
@@ -1784,7 +1906,7 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
         }
       });
       await pipeline(response.data, fs.createWriteStream(input, { mode: 0o600 }), { signal });
-      if (!received || (total && received !== total)) throw new Error('视频下载不完整，请重试');
+      if (!received || (total && received !== total)) throw mediaTransferError('视频下载不完整，请重试');
       if (onProgress) onProgress(received, received, 'decrypting');
       await decryptContentKeyFile(input, output, playInfo.contentKey, { signal });
       return await fsp.readFile(output);
@@ -1802,7 +1924,7 @@ async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal
     }
   }
   if (signal?.aborted) throw new Error('已取消播放');
-  if (!received || (total && received !== total)) throw new Error('视频下载不完整，请重试');
+  if (!received || (total && received !== total)) throw mediaTransferError('视频下载不完整，请重试');
   let buf = Buffer.concat(chunks);
   if (playInfo.spadeA) {
     if (onProgress) onProgress(buf.length, buf.length, 'decrypting');
@@ -1831,7 +1953,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
         const controller = new AbortController();
         job = { controller, force };
         job.promise = (async () => {
-          const playInfo = checkedPlayInfo || await hongguo.fetchPlayUrlSingle(key, seriesId, { force });
+          const playInfo = await withMediaRecovery(key, seriesId, { playInfo: checkedPlayInfo, force, signal: controller.signal }, info => info);
           if (controller.signal.aborted) throw new Error('已取消播放');
           if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
           const prepared = { size: 0, lastUsed: Date.now(), seriesId: String(seriesId || ''), vidIndex: Number(vidIndex) || 0 };
@@ -1853,7 +1975,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
       entry = await job.promise;
     }
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
-    session.entry = entry; entry.lastUsed = Date.now();
+    session.entry = { ...entry }; entry.lastUsed = Date.now();
     return { success: true, url: `${STREAM_SCHEME}://play/${streamId}`, streamId, size: entry.size,
       cached, streaming: !!entry.playInfo };
   } catch (error) {

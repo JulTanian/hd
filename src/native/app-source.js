@@ -239,7 +239,7 @@ async function fetchAppPlayUrl(vid, options = {}) {
     if (!fallback) throw new Error('App 接口未返回本集片源地址');
     const outer = await requestJson(fallback, { headers: { 'User-Agent': VIDEO_UA } }, deadline, signal);
     const info = outer?.video_info?.data;
-    const rows = Object.values(info?.video_list || {}).filter(item => item && (item.main_url || item.backup_url)).map(item => {
+    const rows = Object.values(info?.video_list || {}).filter(item => item && (item.main_url || item.backup_url || Array.isArray(item.backup_url_list))).map(item => {
         const codec = str(item.codec_type || item.video_meta?.codec_type).toLowerCase();
         const codecRank = ['h264', 'avc', 'avc1'].includes(codec) ? 0 : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(codec) ? 1 : 2;
         const quality = str(item.quality_desc || item.definition || item.height || item.vheight || item.video_meta?.definition);
@@ -255,23 +255,31 @@ async function fetchAppPlayUrl(vid, options = {}) {
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
         : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级下载`);
     let lastError;
+    const variants = [];
+    const seen = new Set();
     for (const selected of rows) {
         try {
             const spade = selected.item.spade_a || selected.item.encrypt_info?.spade_a;
             const key = spade ? deriveContentKey(spade) : null;
-            for (const candidate of [selected.item.main_url, selected.item.backup_url]) {
-                if (!candidate) continue;
+            for (const candidate of [selected.item.main_url, selected.item.backup_url, ...(Array.isArray(selected.item.backup_url_list) ? selected.item.backup_url_list : [])]) {
+                if (typeof candidate !== 'string' || !candidate) continue;
                 try {
                     const media = info.key_seed
                         ? decryptSpadeUrl(candidate, Buffer.from(info.key_seed, 'base64'))
                         : cleanUrl(candidate);
                     const url = checkedUrl(media, ['qznovelvod.com', 'fqnovelvod.com', 'douyinvod.com']);
-                    return { url, contentKey: key ? key.toString('hex') : null, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', quality: requestedQuality === 'auto' ? selected.quality : requestedQuality,
-                        ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) };
+                    const contentKey = key ? key.toString('hex') : null;
+                    const identity = `${url}:${contentKey || ''}`;
+                    if (seen.has(identity)) continue;
+                    seen.add(identity);
+                    variants.push({ url, contentKey, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', vid,
+                        userAgent: VIDEO_UA, referer: 'https://novelquickapp.com/', quality: requestedQuality === 'auto' ? selected.quality : requestedQuality,
+                        ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) });
                 } catch (error) { lastError = error; }
             }
         } catch (error) { lastError = error; }
     }
+    if (variants.length) return { ...variants[0], variants };
     throw lastError || new Error('本集暂未提供有效片源地址');
 }
 

@@ -24,7 +24,9 @@ function appFixture(videoList) {
 function routeFixture(appError = false) {
   const calls = [];
   const native = load('hongguo.js', {
-    axios: { get: async () => { calls.push('web'); return { data: JSON.stringify({ main_url: mediaUrl('web') }) }; } },
+    axios: { get: async () => { calls.push('web'); return { data: `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+      'player_(series_id)/(vid)/page': { vid: '11', series_id: '1', seriesDetail: { series_id: '1' }, publicVideoSeo: { available: true, itemId: '11', seriesId: '1' } },
+    } })}</script><script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: 'https://hongguoduanju.com/player/1/11', contentUrl: mediaUrl('web') })}</script>` }; } },
     './app-source': { fetchAppPlayUrl: async (_vid, options) => {
       calls.push(options.quality);
       if (appError) throw new Error('没有符合所选清晰度的片源');

@@ -107,7 +107,14 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     const nativeRequire = createRequire(nativePath);
     const context = vm.createContext({ module: { exports: {} }, Buffer, URL, process: { env: {} }, console,
       Date: class extends Date { static now() { return now; } },
-      require: name => name === 'axios' ? { get: async () => { webHits++; return { data: '{"main_url":"https://media.example/web.mp4"}' }; } }
+      require: name => name === 'axios' ? { get: async url => {
+        webHits++;
+        const vid = /\/(\d+)$/.exec(url)?.[1];
+        return { data: `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+          'player_(series_id)/(vid)/page': { vid, series_id: '1', seriesDetail: { series_id: '1' },
+            publicVideoSeo: { available: true, itemId: vid, seriesId: '1' } },
+        } })}</script><script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: `https://hongguoduanju.com/player/1/${vid}`, contentUrl: 'https://media.example/web.mp4' })}</script>` };
+      } }
         : name === './app-source' ? { fetchAppPlayUrl: async () => { appHits++; return { url: 'https://media.example/app.mp4', source: 'app' }; } } : nativeRequire(name),
     });
     vm.runInContext(fs.readFileSync(nativePath, 'utf8'), context);
@@ -224,16 +231,18 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     assert.equal(h.run('downloadTasks[0].status'), 'stopped');
     assert.equal(fs.existsSync(path.join(root, 'stop.mp4')), false);
   });
-  await check('immediate retry waits for cancelled run and then completes once', async () => {
+  await check('immediate retry cannot let cancelled lookup start a competing media writer', async () => {
     let resolve, lookups = 0;
+    const before = hits;
     const h = hload(() => { lookups++; return lookups === 1 ? new Promise(r => resolve = r) : Promise.resolve({ url: base + '/range' }); });
     h.run("downloadTasks = [{id:'retry',status:'pending',type:'hongguo',filename:'retry.mp4',customDir:" + JSON.stringify(root) + ",hongguoInfo:{vid:'retry'}}]; downloadQueue = downloadTasks.slice(); pumpQueue();");
     await h.handlers['stop-download']({}, 'retry');
     await h.handlers['retry-task']({}, 'retry');
-    assert.equal(lookups, 1, 'retry cannot start before previous run settles');
+    assert.ok(h.run('runningDownloads.size') <= 1, 'only one task may own the destination');
     resolve({ url: base + '/range' }); await sleep(80);
     assert.equal(lookups, 2); assert.equal(h.run('downloadTasks[0].status'), 'completed');
     assert.equal(fs.readFileSync(path.join(root, 'retry.mp4'), 'utf8'), '0123456789');
+    assert.equal(hits, before + 1, 'late cancelled lookup must not start a second media transfer');
   });
   await check('extra: enqueue reuses failed task instead of competing destination writers', async () => {
     const h = hload(() => new Promise(() => {}));
@@ -337,7 +346,11 @@ function load(fetchPlayUrlSingle, overrides = {}) {
       assert.equal(response.status, 416, range); assert.equal(response.headers.get('content-range'), 'bytes */10');
     }
   });
-  for (const h of harnesses) h.context.clearOnlineCache();
+  for (const h of harnesses) {
+    h.context.clearOnlineCache();
+    h.run('for (const task of downloadTasks) task.cancelSource?.cancel("fixture cleanup")');
+  }
+  await sleep(0);
   server.closeAllConnections(); await new Promise(r => server.close(r));
   assert.equal(failures, 0, `${failures} streaming regressions`);
 })().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(() => fs.rmSync(root, { recursive: true, force: true }));

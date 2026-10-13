@@ -5,7 +5,10 @@ const vm = require('node:vm');
 
 const sourcePath = path.join(__dirname, '../src/native/hongguo.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
-const page = '{"vid_list":["11","12"],"series_name":"测试剧","main_url":"https://media.example/video.mp4"}';
+const page = `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+  'player_(series_id)/(vid)/page': { vid: '11', series_id: '1', seriesDetail: { series_id: '1', vid_list: ['11', '12'], series_name: '测试剧' },
+    publicVideoSeo: { available: true, itemId: '11', seriesId: '1' } },
+} })}</script><script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: 'https://hongguoduanju.com/player/1/11', contentUrl: 'https://media.example/video.mp4' })}</script>`;
 
 function fixture({ web = true, api = false, app = false, blockedVids = [], html = page } = {}) {
   let now = 0;
@@ -107,7 +110,8 @@ const checks = [
     assert.equal(list.episodes[0].web_available, true);
     assert.equal(list.episodes[1].web_available, false);
     assert.equal(unavailable.url, null);
-    assert.match(unavailable.error, /前 1 集.*第 2 集/);
+    assert.equal(unavailable.code, 'SOURCE_UNAVAILABLE');
+    assert.doesNotMatch(unavailable.error, /前 1 集.*第 2 集/);
     assert.doesNotMatch(unavailable.error, /付费|会员/);
     state.api = true;
     const restored = await native.fetchPlayUrlSingle('12', '1');

@@ -71,7 +71,9 @@ function nativeFixture() {
   };
   vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'hongguo.js'), 'utf8') + '\nmodule.exports.parseModelVideo = parseModelVideo;', context);
   return { ...context.module.exports, pending,
-    finish(index, name) { pending[index]({ data: JSON.stringify({ main_url: `https://media.example/${name}.mp4` }) }); },
+    finish(index, name) { pending[index]({ data: `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+      'player_(series_id)/(vid)/page': { vid: '11', series_id: '1', seriesDetail: { series_id: '1' }, publicVideoSeo: { available: true, itemId: '11', seriesId: '1' } },
+    } })}</script><script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: 'https://hongguoduanju.com/player/1/11', contentUrl: `https://media.example/${name}.mp4` })}</script>` }); },
   };
 }
 const mediaUrl = name => `https://v3-reading.qznovelvod.com/${name}.mp4`;
