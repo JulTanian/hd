@@ -96,7 +96,7 @@ function SettingsPage({ active = true, preview = false }) {
     try {
       // Playback options may change while this retained settings page is hidden.
       const current = await window.electronAPI.getSettings();
-      const editable = ['root', 'name_format', 'download_quality', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'app_updates_enabled'];
+      const editable = ['root', 'name_format', 'download_quality', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'app_updates_enabled'];
       const submitted = { ...current };
       for (const key of editable) if (Object.hasOwn(next, key)) submitted[key] = next[key];
       const res = await window.electronAPI.saveSettings(submitted);
@@ -182,6 +182,10 @@ function SettingsPage({ active = true, preview = false }) {
       <ShortcutSettings active={active} />
       <p className="settings-hint">播放页顶部可开启隐身小窗。鼠标移开时暂停隐藏，移回继续；Esc 或 Dock 可恢复主窗口。</p>
       <fieldset className="settings-card" disabled={saving}>
+        <div className="settings-group">
+          <span className="settings-label">播放器</span>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label="显示弹幕按钮" checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">显示弹幕按钮<em>保存后生效。关闭时隐藏弹幕及弹幕设置按钮，并停用评论弹幕；再次开启会恢复原有弹幕偏好。</em></span></label>
+        </div>
         <div className="settings-group">
           <label className="settings-label">下载目录</label>
           <div className="folder-row">

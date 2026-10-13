@@ -19,6 +19,7 @@ import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown,
 function Player({ target, onNavigate, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
   const enhancement = useVideoEnhancement();
   const [shortcuts, setShortcuts] = useState(readShortcuts);
+  const [showDanmakuControls, setShowDanmakuControls] = useState(false);
   useEffect(() => subscribeShortcuts(setShortcuts), []);
   const [portraitActionsOpen, setPortraitActionsOpen] = useState(false);
   const [windowFill, setWindowFill] = useState(false);
@@ -263,7 +264,10 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     let cancelled = false;
     setQualityLoading(true);
     window.electronAPI.getSettings().then((settings) => {
-      if (!cancelled) setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
+      if (!cancelled) {
+        setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
+        setShowDanmakuControls(settings?.show_danmaku_controls !== false);
+      }
     }).catch(() => {
       if (!cancelled) showToast('默认下载清晰度读取失败，请确认清晰度后再下载');
     }).finally(() => { if (!cancelled) setQualityLoading(false); });
@@ -392,7 +396,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   // 原生全屏依附于 video 节点。准备下一集时保留结束帧，换源不换节点。
   if (canPlay) lastVideoSrcRef.current = playableSource;
   const videoSrc = compatProgress ? '' : lastVideoSrcRef.current;
-  const danmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: active && canPlay, source: videoSrc });
+  const danmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: active && canPlay && showDanmakuControls, source: videoSrc });
 
   useEffect(() => {
     const v = videoRef.current;
@@ -1307,7 +1311,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
           />
         <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
         <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />
-        <PlayerControls danmaku={danmaku} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
+        <PlayerControls danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
