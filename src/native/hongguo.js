@@ -309,6 +309,11 @@ function shareHttpUrl(value, base) {
 async function resolveSeriesId(shareUrl) {
   if (typeof shareUrl !== 'string' || shareUrl.length > 8192) throw new Error('分享内容无效或过长');
   const trimmed = shareUrl.trim();
+  if (trimmed.startsWith('custom:')) {
+    if (!/^custom:[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}:\d{1,30}$/i.test(trimmed)) throw new Error('自定义剧集编号无效');
+    require('./custom-source').assertEnabled(trimmed);
+    return trimmed.toLowerCase();
+  }
   if (/^\d{1,30}$/.test(trimmed)) return trimmed;
   const link = trimmed.match(/https?:\/\/[^\s<>"'，。！？；、【】（）]+/i)?.[0];
   if (!link) throw new Error('请输入有效的 HTTP 或 HTTPS 分享链接，或剧集 ID');
@@ -366,6 +371,7 @@ async function resolveSeriesId(shareUrl) {
  * 获取全集剧集列表
  */
 async function fetchEpisodeList(seriesId) {
+  if (String(seriesId).startsWith('custom:')) return require('./custom-source').fetchEpisodeList(seriesId);
   if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
   if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
   return cachedRequest(`episodes:${seriesId}`, 60000, () => fetchEpisodeListFresh(seriesId));
@@ -495,6 +501,7 @@ function parseModelVideo(vm) {
 async function fetchPlayUrlSingle(vid, sid, options = {}) {
   try {
     const quality = normalizeDownloadQuality(options.quality);
+    if (String(vid).startsWith('custom:') || String(sid).startsWith('custom:')) return require('./custom-source').fetchPlayUrlSingle(vid, sid, options);
     if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
     if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
     const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();

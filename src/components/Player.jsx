@@ -16,7 +16,7 @@ import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown,
  *  - 「边下边看」：下一集若还在下载，显示等待态并轮询，下完自动接上
  *  - 断点续播：按 series_id 记住看到第几集、第几秒
  */
-function Player({ target, onNavigate, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
+function Player({ target, onNavigate, onSeriesSelected, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
   const enhancement = useVideoEnhancement();
   const [shortcuts, setShortcuts] = useState(readShortcuts);
   const [showDanmakuControls, setShowDanmakuControls] = useState(false);
@@ -83,6 +83,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
   const playbackRateRef = useRef(1);
   const toastTimer = useRef(null);
   const pendingSeekRef = useRef(0); // 切集后要跳转的秒数
+  const pendingAutoplayRef = useRef(true);
   const lastSavedRef = useRef(0);
   const stateRef = useRef({ currentIndex, autoNext, activeSeriesId });
   stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor };
@@ -138,7 +139,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     }
   }, []);
 
-  const resetPlayback = useCallback(() => {
+  const resetPlayback = useCallback((autoplay = true) => {
+    pendingAutoplayRef.current = autoplay;
     setAutoAdvancing(false);
     persistPosition(true);
     const previous = loadedMediaRef.current;
@@ -372,8 +374,9 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
         if (ep && !ep.locked && ep.status === 'completed') {
           // 等待中的下一集下好了 -> 自动切过去
           setWaitingFor(null);
-          const seekTo = wf === stateRef.current.currentIndex ? currentPosition() : 0;
-          resetPlayback();
+          const sameEpisode = wf === stateRef.current.currentIndex;
+          const seekTo = sameEpisode ? currentPosition() : 0;
+          resetPlayback(!sameEpisode || !loadedMediaRef.current?.element.paused);
           pendingSeekRef.current = seekTo;
           setCurrentIndex(wf);
         }
@@ -719,7 +722,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     }
     pendingSeekRef.current = 0;
     if (compatMap[currentIndex]) releaseOnline();
-    v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
+    if (pendingAutoplayRef.current) v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
   };
 
   const toggleFullscreen = useCallback(async () => {
@@ -779,6 +782,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     persistPosition(true);
     const version = ++selectionVersion.current;
     selectedSeriesRef.current = String(sid);
+    onSeriesSelected?.(String(sid));
     pendingTargetRef.current = null;
     reconnectAttemptRef.current = null;
     onlineSourceRef.current = null;
@@ -805,7 +809,7 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
     } finally {
       if (version === selectionVersion.current) setLoading(false);
     }
-  }, [persistPosition, resetPlayback, loadDetail, showToast]);
+  }, [persistPosition, resetPlayback, loadDetail, showToast, onSeriesSelected]);
 
   // 初次进入与浏览点播共用一次载入，避免两个初始化请求互相覆盖。
   useEffect(() => {
@@ -893,11 +897,14 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
 
   const downloadEpisode = async (vidIndex) => {
     if (qualityLoading || !episodes.some((ep) => ep.vid_index === vidIndex && !ep.locked)) return;
+    const selection = selectionVersion.current;
+    const media = mediaVersion.current;
     try {
       const res = await window.electronAPI.downloadSingleEpisode(activeSeriesId, vidIndex, downloadQuality);
       if (res && res.success) {
         showToast(res.count > 0 ? `第 ${vidIndex} 集已加入下载队列` : `第 ${vidIndex} 集已在队列中`);
-        if (currentIndex === vidIndex) setWaitingFor(vidIndex);
+        if (selection === selectionVersion.current && media === mediaVersion.current
+          && String(activeSeriesId) === selectedSeriesRef.current && stateRef.current.currentIndex === vidIndex) setWaitingFor(vidIndex);
       } else {
         showToast((res && res.error) || '加入下载失败');
       }

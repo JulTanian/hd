@@ -21,7 +21,7 @@ const publicUrls = ['https://fc-cdn.example/a', 'https://fd-cdn.example/a', 'htt
 function mainFixture(root, calls, marked) {
   const mainPath = path.resolve(__dirname, '../main.js'), mainRequire = createRequire(mainPath);
   const app = new EventEmitter();
-  Object.assign(app, { getVersion: () => 'test', getPath: () => root, commandLine: { appendSwitch() {} }, whenReady: () => ({ then() {} }) });
+  Object.assign(app, { getVersion: () => 'test', getPath: () => root, commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }) });
   const axios = Object.assign(async config => { calls.push(config); return { status: 200, headers: {}, data: 'ok' }; }, { isCancel: () => false });
   const native = { UA: 'app', WEB_UA: 'browser', WEB_REFERER: 'https://hongguoduanju.com/',
     fetchPlayUrlSingle: async () => ({ url: 'https://media.example/safe', source: 'app' }), markWebMediaFailure: info => marked.push(info.vid) };
