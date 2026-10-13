@@ -4,10 +4,10 @@
 .comment-danmaku-status { position: absolute; top: 12px; left: 12px; max-width: calc(100% - 24px); padding: 6px 10px; border-radius: 6px; background: rgba(20, 21, 19, .82); color: #fff; font-size: 12px; line-height: 1.5; }
 .player-controls-danmaku { display: flex; align-items: center; gap: 2px; }
 .player-controls .danmaku-icon-button { flex: none; }
-.danmaku-symbol { position: relative; display: block; width: 24px; height: 26px; font-size: 22px; line-height: 24px; font-weight: 600; }
-.danmaku-state-mark { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 6px; border-radius: 4px; background: currentColor; opacity: .5; }
+.danmaku-symbol { position: relative; display: block; width: 18px; height: 20px; font-size: 16px; line-height: 18px; font-weight: 500; }
+.danmaku-state-mark { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 5px; border-radius: 4px; background: currentColor; opacity: .5; }
 .danmaku-enabled .danmaku-state-mark { background: var(--accent); opacity: 1; }
-.danmaku-settings-mark { position: absolute; right: -3px; bottom: -3px; display: flex; padding: 1px; border-radius: 50%; background: #242424; }
+.danmaku-settings-mark { position: absolute; right: -3px; bottom: -2px; display: flex; padding: 1px; border-radius: 50%; background: #242424; }
 .danmaku-settings { position: absolute; bottom: calc(100% + 4px); left: clamp(8px, 120px, calc(100% - 304px)); width: min(296px, calc(100% - 16px)); overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px; border-radius: 10px; background: var(--bg-elevated); color: var(--text-primary); box-shadow: 0 4px 22px rgba(0, 0, 0, .22); pointer-events: auto; }
 .danmaku-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
 .danmaku-settings p { margin: 8px 0 12px; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
