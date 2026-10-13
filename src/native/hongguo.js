@@ -246,7 +246,7 @@ async function fetchEpisodeListFromWeb(seriesId) {
  * 因此不需要 spade_a / 解密这一步。
  * sid 已知时用 /player/{sid}/{vid}；未知时退回 /player/_/{vid} 再自行解析。
  */
-async function fetchPlayUrlFromWeb(vid, sid) {
+async function fetchPlayUrlFromWeb(vid, sid, onFailure) {
   const candidates = [];
   if (sid) candidates.push(`${SITE_ORIGIN}/player/${encodeURIComponent(sid)}/${encodeURIComponent(vid)}`);
   candidates.push(`${SITE_ORIGIN}/player/_/${encodeURIComponent(vid)}`);
@@ -258,6 +258,8 @@ async function fetchPlayUrlFromWeb(vid, sid) {
       const router = require('./catalog').readRouterData(html);
       const data = router.loaderData?.['player_(series_id)/(vid)/page'];
       const actualSid = String(data?.series_id || '');
+      lastErr = { code: !data ? 'MISSING_MODEL' : data.isSuccess === false ? 'BUSINESS_REJECTED'
+        : data.publicVideoSeo?.available === false ? 'NO_PLAYABLE_SOURCE' : 'INVALID_RESPONSE' };
       if (!data || data.isSuccess === false || String(data.vid) !== String(vid) || !/^\d+$/.test(actualSid) ||
           (sid && actualSid !== String(sid)) || String(data.seriesDetail?.series_id) !== actualSid ||
           data.publicVideoSeo?.available !== true || String(data.publicVideoSeo.itemId) !== String(vid) ||
@@ -278,14 +280,15 @@ async function fetchPlayUrlFromWeb(vid, sid) {
             (video['@id'] && !matchesPlayer(video['@id']))) continue;
         let videoUrl;
         try { videoUrl = new URL(normalizeVideoUrl(video.contentUrl)); } catch (_) { continue; }
-        if (!isPublicMediaUrl(videoUrl.href)) continue;
+        if (!isPublicMediaUrl(videoUrl.href)) { lastErr = { code: 'SECURITY_BLOCKED' }; continue; }
         return { url: videoUrl.href, spadeA: null, codec: '', source: 'web', vid: String(vid), userAgent: WEB_UA, referer: WEB_REFERER };
       }
     } catch (e) {
       lastErr = e;
     }
   }
-  if (lastErr) console.warn('[Web] 取播放直链失败:', lastErr.message);
+  if (lastErr) console.warn('[Web] 取播放直链失败:', sourceFailure('web', lastErr).message);
+  onFailure?.(lastErr);
   return null;
 }
 
@@ -521,10 +524,16 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
 }
 
 function sourceFailure(source, error) {
-  const status = Number(error?.response?.status || String(error?.message || '').match(/HTTP\s+(\d{3})/)?.[1]);
-  if (status >= 400 && status <= 599) return { source, code: `HTTP_${status}`, message: `请求失败（HTTP ${status}）` };
-  if (/超时|timeout/i.test(String(error?.message || ''))) return { source, code: 'TIMEOUT', message: '请求超时' };
-  if (/空响应|有效数据|JSON/.test(String(error?.message || ''))) return { source, code: 'INVALID_RESPONSE', message: '接口未返回有效数据' };
+  const message = String(error?.message || '');
+  const code = String(error?.code || '');
+  const status = Number(error?.status || error?.response?.status || message.match(/HTTP\s+(\d{3})/)?.[1]);
+  if (status >= 300 && status <= 599) return { source, code: `HTTP_${status}`, message: `请求失败（HTTP ${status}）` };
+  if (code === 'SECURITY_BLOCKED' || code.startsWith('ERR_WEB_MEDIA_')) return { source, code: 'SECURITY_BLOCKED', message: '片源地址被安全校验阻止' };
+  if (['ECONNABORTED', 'ETIMEDOUT', 'TIMEOUT'].includes(code) || /超时|timeout/i.test(message)) return { source, code: 'TIMEOUT', message: '请求超时' };
+  if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ERR_NETWORK', 'ERR_CANCELED'].includes(code)) return { source, code: 'NETWORK_ERROR', message: '网络连接失败，请稍后重试' };
+  if (code === 'BUSINESS_REJECTED') return { source, code, message: '接口暂时拒绝本次请求' };
+  if (code === 'MISSING_MODEL' || /未返回目录数据/.test(message)) return { source, code: 'MISSING_MODEL', message: '接口未返回本集片源模型' };
+  if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };
   return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };
 }
 
@@ -538,9 +547,8 @@ function unavailableSources(sources, quality = 'auto') {
 
 async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   const sources = [];
-  const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid);
+  const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid, error => sources.push(sourceFailure('web', error)));
   if (web && web.url) return web;
-  if (!skipWeb) sources.push(sourceFailure('web'));
 
   try {
     return await require('./app-source').fetchAppPlayUrl(String(vid));
@@ -564,9 +572,8 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   }
   // A transient CDN failure changes priority, not permanent source availability.
   if (skipWeb) {
-    const lastWeb = await fetchPlayUrlFromWeb(vid, sid);
+    const lastWeb = await fetchPlayUrlFromWeb(vid, sid, error => sources.push(sourceFailure('web', error)));
     if (lastWeb?.url) return lastWeb;
-    sources.push(sourceFailure('web'));
   }
   throw unavailableSources(sources);
 }

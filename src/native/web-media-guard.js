@@ -1,5 +1,7 @@
 const { isIP, BlockList } = require('node:net');
 const dns = require('node:dns');
+const http = require('node:http');
+const https = require('node:https');
 
 const blocked = new BlockList();
 for (const [address, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
@@ -34,29 +36,82 @@ function blockedAddress() {
   return Object.assign(new Error('官网片源及其跳转、解析结果必须指向公网'), { code: 'ERR_WEB_MEDIA_ADDRESS', mediaRetryable: true });
 }
 
+// The local VPN's Fake-IP route can return a different CDN result. Resolve only this
+// exact official TLS origin through a fixed HTTPS resolver; never connect to Fake-IP.
+let officialDnsCache;
+let officialDnsPending;
+function resolveOfficialAddress() {
+  if (officialDnsCache?.expires > Date.now()) return Promise.resolve(officialDnsCache.addresses);
+  if (officialDnsPending) return officialDnsPending;
+  officialDnsPending = new Promise((resolve, reject) => {
+    const request = https.get('https://1.1.1.1/dns-query?name=hongguoduanju.com&type=A', {
+      agent: new https.Agent({ keepAlive: false }), headers: { Accept: 'application/dns-json' },
+    }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('error', reject);
+      response.on('data', chunk => {
+        body += chunk;
+        if (body.length > 65536) request.destroy(blockedAddress());
+      });
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const rows = (data.Answer || []).filter(item => item.type === 1);
+          if (response.statusCode !== 200 || data.Status !== 0 || !rows.length ||
+              rows.some(item => isIP(item.data) !== 4 || !isPublicAddress(item.data))) throw blockedAddress();
+          const addresses = rows.map(item => ({ address: item.data, family: 4 }));
+          const ttl = Math.max(0, Math.min(60, ...rows.map(item => Number(item.TTL) || 0)));
+          officialDnsCache = { addresses, expires: Date.now() + ttl * 1000 };
+          resolve(addresses);
+        } catch (_) { reject(blockedAddress()); }
+      });
+    });
+    const timer = setTimeout(() => request.destroy(Object.assign(new Error('官网安全 DNS 解析超时'), { code: 'ETIMEDOUT' })), 4000);
+    request.on('close', () => clearTimeout(timer));
+    request.on('error', reject);
+  }).finally(() => { officialDnsPending = null; });
+  return officialDnsPending;
+}
+
 function webMediaRequestOptions(value) {
   if (!isPublicMediaUrl(value)) throw blockedAddress();
-  const hosts = new Set([new URL(value).hostname.toLowerCase()]);
+  const initial = new URL(value);
+  const hosts = new Map([[initial.hostname.toLowerCase(), initial]]);
   return {
     maxRedirects: 5,
+    // A global pooled socket can skip this request's lookup entirely.
+    httpAgent: new http.Agent({ keepAlive: false }),
+    httpsAgent: new https.Agent({ keepAlive: false }),
     lookup(hostname, options, callback) {
       const settings = typeof options === 'number' ? { family: options } : options || {};
-      dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
-        if (error) return callback(error);
-        // Validate the actual socket lookup; a separate DNS preflight permits rebinding.
-        if (hosts.has(hostname.toLowerCase()) && (!addresses.length || addresses.some(item => !isPublicAddress(item.address)))) {
-          return callback(blockedAddress());
-        }
-        // User-selected proxies may be local; their remote DNS remains a trust boundary.
+      const finish = addresses => {
         if (settings.all) callback(null, addresses);
         else if (addresses.length) callback(null, addresses[0].address, addresses[0].family);
         else callback(new Error('片源域名未解析到地址'));
+      };
+      dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
+        if (error) return callback(error);
+        const target = hosts.get(hostname.toLowerCase());
+        // Validate actual socket resolution; a separate preflight permits rebinding.
+        if (target && (!addresses.length || addresses.some(item => !isPublicAddress(item.address)))) {
+          const official = target.origin === 'https://hongguoduanju.com';
+          const fakeOnly = addresses.length && addresses.every(item => isPublicAddress(item.address) ||
+            item.family === 4 && /^198\.(18|19)\./.test(item.address));
+          if (official && fakeOnly && settings.family !== 6) {
+            resolveOfficialAddress().then(finish, callback);
+            return;
+          }
+          return callback(blockedAddress());
+        }
+        // User-selected proxies may be local; their remote DNS remains a trust boundary.
+        finish(addresses);
       });
     },
     beforeRedirect(_options, response, request) {
       const target = new URL(response.headers.location, request.url);
       if (!isPublicMediaUrl(target.href)) throw blockedAddress();
-      hosts.add(target.hostname.toLowerCase());
+      hosts.set(target.hostname.toLowerCase(), target);
     },
   };
 }

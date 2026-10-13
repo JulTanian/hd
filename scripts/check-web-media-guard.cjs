@@ -44,9 +44,21 @@ function provider(mediaUrl) {
   vm.runInNewContext(fs.readFileSync(nativePath, 'utf8'), context);
   return context.module.exports;
 }
-function guardWithDns(addresses) {
-  const context = { module: { exports: {} }, URL,
-    require: n => n === 'node:dns' ? { lookup: (_host, _options, callback) => callback(null, addresses) } : req(n) };
+function guardWithDns(addresses, answer = '8.8.8.8') {
+  const context = { module: { exports: {} }, URL, setTimeout, clearTimeout,
+    require: n => n === 'node:dns' ? { lookup: (_host, _options, callback) => callback(null, addresses) }
+      : n === 'node:https' ? { ...req(n), get: (url, options, callback) => {
+        assert.equal(url, 'https://1.1.1.1/dns-query?name=hongguoduanju.com&type=A');
+        const request = new EventEmitter();
+        request.destroy = error => { if (error) request.emit('error', error); request.emit('close'); };
+        process.nextTick(() => {
+          const response = new EventEmitter(); response.statusCode = 200; response.setEncoding = () => {};
+          callback(response);
+          response.emit('data', JSON.stringify({ Status: 0, Answer: [{ type: 1, data: answer, TTL: 60 }] }));
+          response.emit('end'); request.emit('close');
+        });
+        return request;
+      } } : req(n) };
   vm.runInNewContext(fs.readFileSync(guardPath, 'utf8'), context);
   return context.module.exports;
 }
@@ -67,6 +79,39 @@ const checks = [
       await assert.rejects(new Promise((resolve, reject) => options.lookup('media.example', { all: true },
         (error, result) => error ? reject(error) : resolve(result))), /公网/);
     }
+  }],
+  ['Fake-IP compatibility is confined to the exact official HTTPS origin', async () => {
+    const records = [{ address: '198.18.14.190', family: 4 }];
+    const lookup = (guard, host) => new Promise((resolve, reject) => guard.lookup(host, { all: true },
+      (error, result) => error ? reject(error) : resolve(result)));
+    const guard = guardWithDns(records).webMediaRequestOptions('https://hongguoduanju.com/video/a');
+    assert.equal((await lookup(guard, 'hongguoduanju.com'))[0].address, '8.8.8.8');
+    await assert.rejects(lookup(guardWithDns(records, '127.0.0.1').webMediaRequestOptions('https://hongguoduanju.com/a'), 'hongguoduanju.com'), /公网/);
+    for (const url of ['http://hongguoduanju.com/a', 'https://hongguoduanju.com:8443/a',
+      'https://other.example/a', 'https://sub.hongguoduanju.com/a']) {
+      await assert.rejects(lookup(guardWithDns(records).webMediaRequestOptions(url), new URL(url).hostname), /公网/);
+    }
+    assert.throws(() => guardWithDns(records).webMediaRequestOptions('https://198.18.14.190/a'), /公网/);
+    for (const address of ['127.0.0.1', '10.0.0.1', '192.168.1.1']) {
+      await assert.rejects(lookup(guardWithDns([...records, { address, family: 4 }])
+        .webMediaRequestOptions('https://hongguoduanju.com/a'), 'hongguoduanju.com'), /公网/);
+    }
+    guard.beforeRedirect({}, { headers: { location: 'http://hongguoduanju.com/b' } }, { url: 'https://hongguoduanju.com/a' });
+    await assert.rejects(lookup(guard, 'hongguoduanju.com'), /公网/);
+  }],
+  ['unguarded warm sockets cannot bypass a guarded request', async () => {
+    const axios = req('axios'); let hits = 0;
+    const server = http.createServer((_request, response) => { hits++; response.end('ok'); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://media.example:${server.address().port}/a`;
+    try {
+      await axios.get(url, { proxy: false, timeout: 2000, lookup: (_h, options, cb) =>
+        cb(null, options.all ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4) });
+      await assert.rejects(axios.get(url, { proxy: false, timeout: 2000,
+        ...guardWithDns([{ address: '127.0.0.1', family: 4 }]).webMediaRequestOptions(url) }),
+        error => error.code === 'ERR_WEB_MEDIA_ADDRESS');
+      assert.equal(hits, 1);
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   }],
   ['public DNS preserves all/single lookup shape and trusts configured proxy resolution', async () => {
     const records = [{ address: '8.8.8.8', family: 4 }];

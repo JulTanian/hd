@@ -502,6 +502,52 @@ function enqueuePendingTasks() {
   return pending.length;
 }
 
+// Official web episodes open and close within minutes, and the App channel rejects
+// repeat requests; retry a few times later instead of hammering the sources now.
+const SOURCE_RETRY_DELAYS = [3, 8, 15].map(minutes => minutes * 60000);
+const sourceRetryTimers = new Map();
+
+function isDeferrableSourceError(task, error) {
+  if (!/^\d{1,30}$/.test(String(task.hongguoInfo?.vid || ''))) return false;
+  if (error?.code === 'SOURCE_UNAVAILABLE') {
+    const sources = Array.isArray(error.sources) ? error.sources : [];
+    return sources.some(item => item.source === 'web') && !sources.some(item => item.code === 'SECURITY_BLOCKED');
+  }
+  return [404, 410].includes(error?.mediaStatus) && normalizeDownloadQuality(task.downloadQuality) === 'auto';
+}
+
+function armSourceRetry(task) {
+  clearTimeout(sourceRetryTimers.get(task.id));
+  const at = task.retryAt;
+  sourceRetryTimers.set(task.id, setTimeout(() => {
+    sourceRetryTimers.delete(task.id);
+    if (task.status !== 'failed' || task.retryAt !== at || !downloadTasks.includes(task)) return;
+    repairTaskDestination(task);
+    // Keep the plan durable while waiting for a free download slot.
+    task.status = 'pending'; task.progress = 0; task.receivedBytes = 0; task.totalBytes = 0; task.cancelled = false;
+    delete task.error;
+    if (!downloadQueue.some((t) => t.id === task.id)) downloadQueue.push(task);
+    try { saveDownloadTasks(); }
+    catch (error) {
+      // store reports storage-error; keep the plan for manual retry or the next launch.
+      task.status = 'failed'; task.error = storageError?.error || error.message;
+      downloadQueue = downloadQueue.filter(t => t.id !== task.id);
+      sendToRenderer('download-queue-changed', {});
+      return;
+    }
+    sendToRenderer('download-queue-changed', {});
+    pumpQueue();
+  }, Math.max(1000, at - Date.now())));
+}
+
+/** Manual retry, pause and resume take over from any scheduled automatic retry. */
+function clearSourceRetry(task) {
+  clearTimeout(sourceRetryTimers.get(task.id));
+  sourceRetryTimers.delete(task.id);
+  delete task.retryAt;
+  delete task.sourceRetries;
+}
+
 /**
  * 一键暂停：取消进行中的任务、清空等待队列、把等待中的标记为已停止。
  * 返回被暂停的任务数。
@@ -509,7 +555,13 @@ function enqueuePendingTasks() {
 function pauseAllTasks() {
   let stopped = 0;
   for (const task of downloadTasks) {
-    if (task.status === 'pending') {
+    if (task.status === 'failed' && task.retryAt) {
+      clearSourceRetry(task);
+      task.status = 'stopped';
+      task.error = '已手动暂停';
+      stopped++;
+    } else if (task.status === 'pending') {
+      clearSourceRetry(task);
       task.status = 'stopped';
       task.error = '已手动暂停';
       task.endTime = Date.now();
@@ -543,6 +595,7 @@ function resumeAllTasks() {
   for (const task of downloadTasks) {
     if (task.status !== 'stopped' && task.status !== 'failed' && task.status !== 'pending' && !(task.status === 'completed' && !hasCompleteTaskFile(task))) continue;
 
+    clearSourceRetry(task);
     repairTaskDestination(task);
     task.status = 'pending';
     task.progress = 0;
@@ -601,7 +654,7 @@ async function executeHongguoDownload(task) {
   task.cancelSource = source;
   let tmpPath, writer;
   try {
-    task.status = 'downloading'; task.cancelled = false; task.progress = 0;
+    task.status = 'downloading'; task.cancelled = false; task.progress = 0; delete task.retryAt;
     sendToRenderer('download-progress', { id, progress: 0, receivedBytes: 0, totalBytes: 0 });
     const settings = getCurrentSettings();
     // Old and retried tasks retain their original policy, independent of new defaults.
@@ -621,7 +674,7 @@ async function executeHongguoDownload(task) {
       if (!hasCompleteTaskFile(task)) throw new Error('已有本地文件不完整或路径冲突，文件已保留，请先自行检查或移除');
       task.actualQuality = await verifyDownloadQuality(finalPath, quality, true);
       source.token.throwIfRequested();
-      task.status = 'completed'; task.progress = 100; task.endTime = Date.now();
+      task.status = 'completed'; task.progress = 100; task.endTime = Date.now(); delete task.sourceRetries;
       saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
       return;
     }
@@ -703,7 +756,7 @@ async function executeHongguoDownload(task) {
         publishDownloadFile(tmpPath, finalPath);
       }
     });
-    task.status = 'completed'; task.progress = 100; task.endTime = Date.now();
+    task.status = 'completed'; task.progress = 100; task.endTime = Date.now(); delete task.sourceRetries;
     saveDownloadTasks(); sendToRenderer('download-completed', { id, path: finalPath });
   } catch (error) {
     if (writer && !writer.destroyed) writer.destroy();
@@ -715,8 +768,15 @@ async function executeHongguoDownload(task) {
         sendToRenderer('download-stopped', { id });
       }
     } else {
+      const retries = task.sourceRetries || 0;
       task.status = 'failed'; task.error = error.message; task.endTime = Date.now();
-      sendToRenderer('download-failed', { id, error: error.message });
+      if (retries < SOURCE_RETRY_DELAYS.length && isDeferrableSourceError(task, error)) {
+        const delay = SOURCE_RETRY_DELAYS[retries];
+        task.sourceRetries = retries + 1; task.retryAt = Date.now() + delay;
+        task.error = `${error.message} 将在 ${delay / 60000} 分钟后自动重试（${retries + 1}/${SOURCE_RETRY_DELAYS.length}）。`;
+        armSourceRetry(task);
+      }
+      sendToRenderer('download-failed', { id, error: task.error });
     }
     saveDownloadTasks();
   } finally {
@@ -1696,6 +1756,7 @@ async function requestMedia(playInfo, options = {}) {
       if (!cancelled && status) {
         const failure = new Error(`片源请求失败（HTTP ${status}），请重新连接片源`);
         failure.mediaRetryable = [403, 404, 408, 410].includes(status) || status >= 500 && status <= 599;
+        failure.mediaStatus = status;
         throw failure;
       }
       throw error;
@@ -1770,7 +1831,7 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
       }
       cancelled();
       if (!info?.url) {
-        lastError = Object.assign(new Error(info?.error || '未获取到有效播放地址'), { code: info?.code });
+        lastError = Object.assign(new Error(info?.error || '未获取到有效播放地址'), { code: info?.code, sources: info?.sources });
         if (!recoverable(lastError) || info?.locked) throw lastError;
         continue;
       }
@@ -3245,6 +3306,7 @@ ipcMain.handle('stop-download', async (event, taskId) => {
   const task = downloadTasks.find((t) => t.id === taskId);
   if (!task) return { success: false, error: '任务不存在' };
 
+  clearSourceRetry(task);
   task.cancelled = true;
   if (task.cancelSource) { try { task.cancelSource.cancel('用户停止下载'); } catch (_) {} }
   if (task.writer) { try { task.writer.destroy(); } catch (_) {} }
@@ -3265,6 +3327,7 @@ ipcMain.handle('retry-task', async (event, taskId) => {
   if (!task) return { success: false, error: '任务不存在' };
   if (!['failed', 'stopped'].includes(task.status) && !(task.status === 'completed' && !hasCompleteTaskFile(task))) return { success: false, error: '任务仍在进行中或已完成' };
 
+  clearSourceRetry(task);
   repairTaskDestination(task);
 
   task.status = 'pending';
@@ -3288,6 +3351,7 @@ ipcMain.handle('retry-tasks', async (event, taskIds) => {
   for (const taskId of taskIds) {
     const task = downloadTasks.find((t) => t.id === taskId);
     if (task && (task.status === 'failed' || task.status === 'stopped' || (task.status === 'completed' && !hasCompleteTaskFile(task)))) {
+      clearSourceRetry(task);
       repairTaskDestination(task);
       task.status = 'pending';
       task.progress = 0;
@@ -3519,6 +3583,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   await applyProxySettings(settings);
 
   // 启动后自动接着跑「等待中」的任务（上次未下完的队列），无需手动点启动
+  // Automatic source retries scheduled before the app closed continue on the same schedule.
+  for (const task of downloadTasks) if (task.status === 'failed' && task.retryAt) armSourceRetry(task);
   const resumed = enqueuePendingTasks();
   if (resumed > 0) {
     console.log(`[Queue] 启动自动续跑 ${resumed} 个等待中任务，并发 ${MAX_CONCURRENT_DOWNLOADS}`);
