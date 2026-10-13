@@ -72,7 +72,9 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   state.items = state.items.filter(item => reducedMotion ? item.age < 6 : item.x + item.width > 0);
   let changed = before !== state.items.length;
   state.cooldown = Math.max(0, state.cooldown - delta);
-  const lane = Array.from({ length: lanes }, (_, index) => index).find(index => !state.items.some(item => item.lane === index));
+  const laneGap = lanes > 1 ? Math.max(lineHeight, (bottom - top - lineHeight) / (lanes - 1)) : 0;
+  const lane = Array.from({ length: lanes }, (_, index) => index).find(index =>
+    !state.items.some(item => item.lane === index || Math.abs(item.y - (top + index * laneGap)) < lineHeight));
   if (state.cooldown === 0 && lane !== undefined && state.cursor < comments.length) {
     let content = '';
     while (state.cursor < comments.length) {
@@ -85,7 +87,6 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const text = chars.length > 80 ? chars.slice(0, 79).join('') + '…' : content;
     const textWidth = (Array.from(text).length + 1) * settings.fontSize;
     const x = reducedMotion ? 12 : state.nextId === 0 ? Math.max(12, width - textWidth - 12) : width;
-    const laneGap = lanes > 1 ? Math.max(lineHeight, (bottom - top - lineHeight) / (lanes - 1)) : 0;
     state.items.push({ id: state.nextId++, text, content, lane, x, y: top + lane * laneGap, width: textWidth, age: 0 });
     state.cooldown = reducedMotion ? 6 : { sparse: 3, normal: 1.8, dense: 0.9 }[settings.density];
     changed = true;

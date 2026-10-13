@@ -85,6 +85,12 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
   useEffect(() => {
     const state = feed.animation;
     state.items = state.items.filter(item => !commentIsBlocked(item.content, settings));
+    let nextY = 12;
+    for (const item of [...state.items].sort((a, b) => a.y - b.y)) {
+      item.width = (Array.from(item.text).length + 1) * settings.fontSize;
+      item.y = Math.max(item.y, nextY);
+      nextY = item.y + settings.fontSize + 12;
+    }
     setItems([...state.items]);
     const layer = layerRef.current;
     const video = videoRef.current;
@@ -125,12 +131,13 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
       width = nextWidth; height = nextHeight;
       reset(); start();
     };
-    reset(); start();
+    // Settings keep current trajectories and consumption; only new arrivals use the new lanes.
+    start();
     const observer = new ResizeObserver(resize);
     observer.observe(layer);
     const events = { playing: start, play: start, seeked: start, canplay: start, pause: stop, ended: stop, waiting: stop, seeking: seek, emptied: seek };
     Object.entries(events).forEach(([name, handler]) => video.addEventListener(name, handler));
-    return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); nodes.current.clear(); };
+    return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, comments, settings, reducedMotion, source, videoRef, feed]);
 
   if (!running || !available) return null;
