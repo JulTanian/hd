@@ -136,6 +136,14 @@ async function apiCall(apiPath, body, retries = 3) {
 
 const responseCache = new Map();
 const pendingRequests = new Map();
+const failedWebMedia = new Map();
+
+/** A real media GET failed; keep retries off that episode's web CDN briefly. */
+function markWebMediaFailure(playInfo) {
+  if (playInfo?.source !== 'web' || !playInfo.vid) return;
+  failedWebMedia.set(String(playInfo.vid), Date.now() + 5 * 60 * 1000);
+  if (failedWebMedia.size > 128) failedWebMedia.delete(failedWebMedia.keys().next().value);
+}
 
 /** 仅保留短期成功结果；重复点击共享请求，失败后立即允许重试。 */
 async function cachedRequest(key, ttl, load, { force = false } = {}) {
@@ -252,7 +260,7 @@ async function fetchPlayUrlFromWeb(vid, sid) {
 
       const videoUrl = normalizeVideoUrl(m[1]);
       if (!/^https?:\/\//i.test(videoUrl)) continue;
-      return { url: videoUrl, spadeA: null, codec: '', source: 'web' };
+      return { url: videoUrl, spadeA: null, codec: '', source: 'web', vid: String(vid) };
     } catch (e) {
       lastErr = e;
     }
@@ -469,17 +477,18 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
     const quality = normalizeDownloadQuality(options.quality);
     if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
     if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
-    const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}`;
+    const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();
+    const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}`;
     return await cachedRequest(cacheKey, 30000, () => quality === 'auto'
-      ? fetchPlayUrlFresh(vid, sid)
+      ? fetchPlayUrlFresh(vid, sid, skipWeb)
       : require('./app-source').fetchAppPlayUrl(String(vid), { quality }), options);
   } catch (error) {
     return { url: null, spadeA: null, codec: null, error: error.message };
   }
 }
 
-async function fetchPlayUrlFresh(vid, sid) {
-  const web = await fetchPlayUrlFromWeb(vid, sid);
+async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
+  const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid);
   if (web && web.url) return web;
 
   try {
@@ -939,4 +948,7 @@ module.exports = {
   decryptMp4Buffer,
   VIDEO_REFERER,
   UA,
+  WEB_UA,
+  WEB_REFERER,
+  markWebMediaFailure,
 };

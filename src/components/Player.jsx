@@ -1297,7 +1297,11 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               if (!canPlay || compatRequestRef.current || playbackVersion !== mediaVersion.current) return;
               if (videoRef.current && event.currentTarget !== videoRef.current) return;
               if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== videoSrc) return;
-              const failedDecode = [3, 4].includes(event.currentTarget.error?.code);
+              const errorCode = event.currentTarget.error?.code;
+              // Chromium also reports an unavailable HTTP stream as unsupported source (4).
+              const unavailableOnline = errorCode === 4 && videoSrc === onlineUrl;
+              if (unavailableOnline && reconnectOnce()) return;
+              const failedDecode = [3, 4].includes(errorCode);
               if (!failedDecode && event.currentTarget.error?.code === 2 && reconnectOnce()) return;
               if (!failedDecode) {
                 const seekTo = currentPosition(); resetPlayback(); pendingSeekRef.current = seekTo;
@@ -1305,8 +1309,8 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
               }
               setMediaBuffering(false);
               setDecodeFailed(failedDecode);
-              showToast(failedDecode ? '视频解码失败，可选择兼容播放' : '视频加载失败，请重试本集或检查网络');
-              if (failedDecode) tryAutoCompat(currentIndex);
+              showToast(failedDecode ? '片源暂时无法播放，请先重新连接片源' : '视频加载失败，请重试本集或检查网络');
+              if (failedDecode && !unavailableOnline) tryAutoCompat(currentIndex);
             }}
           />
         <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
@@ -1408,9 +1412,9 @@ function Player({ target, onNavigate, active = true, portrait = false, actionsHi
         {!compatProgress && decodeFailed && canPlay && (
           <div className="compat-overlay">
             <Film size={30} />
-            <p>当前片源无法正常解码</p>
+            <p>当前片源暂时无法播放</p>
             <span className="compat-overlay-sub" role={compatError ? 'alert' : undefined}>
-              {compatError || '可以重新连接片源，或尝试重新转码为 H.264 兼容格式。'}
+              {compatError || '请先重新连接片源；若仍有画面或格式问题，可尝试转码为 H.264 兼容格式。'}
             </span>
             <div className="player-placeholder-actions">
               <button className="btn btn-primary" onClick={retryPlayback}>重试本集</button>

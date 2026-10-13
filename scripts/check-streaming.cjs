@@ -15,7 +15,7 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   const handlers = {}, protocols = {}, app = new EventEmitter();
   Object.assign(app, { getVersion: () => 'test', getPath: () => root, commandLine: { appendSwitch() {} }, whenReady: () => ({ then() {} }) });
   const electron = { app, ipcMain: { handle: (n, f) => handlers[n] = f }, protocol: { registerSchemesAsPrivileged() {}, handle: (n, f) => protocols[n] = f } };
-  const native = { fetchPlayUrlSingle, UA: 'test', VIDEO_REFERER: 'https://example.com/', deriveKey: () => Buffer.alloc(16), decryptMp4Buffer: b => b };
+  const native = { fetchPlayUrlSingle, UA: 'test', WEB_UA: 'browser-test', WEB_REFERER: 'https://hongguoduanju.com/', VIDEO_REFERER: 'https://example.com/', deriveKey: () => Buffer.alloc(16), decryptMp4Buffer: b => b };
   const context = vm.createContext({ require: n => overrides[n] || (n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root }) } : req(n)), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   context.registerStreamProtocol();
@@ -24,8 +24,15 @@ function load(fetchPlayUrlSingle, overrides = {}) {
 }
 (async () => {
   let hits = 0, streamClosed = false;
+  const requests = []; const endpointHits = new Map();
   const server = http.createServer((r, s) => {
     hits++;
+    requests.push({ url: r.url, method: r.method, headers: r.headers });
+    endpointHits.set(r.url, (endpointHits.get(r.url) || 0) + 1);
+    if (r.url === '/web-identity' && (r.headers['user-agent'] !== 'browser-test' || r.headers.referer !== 'https://hongguoduanju.com/')) { s.writeHead(404); s.end('wrong identity'); return; }
+    const unstable = /^\/unstable-(404|410|503)/.exec(r.url);
+    if (unstable && endpointHits.get(r.url) % 2 === 1) { s.writeHead(Number(unstable[1])); s.end('temporary'); return; }
+    if (r.url.startsWith('/status-')) { s.writeHead(Number(r.url.slice(8))); s.end('unavailable'); return; }
     if (r.url === '/full-partial') { s.writeHead(206, { 'content-length': '10', 'content-range': 'bytes 0-9/10' }); s.end('0123456789'); return; }
     if (r.url === '/short-partial') { s.writeHead(206, { 'content-length': '3', 'content-range': 'bytes 0-9/10' }); s.end('012'); return; }
     if (r.url === '/partial') { s.writeHead(206, { 'content-length': '3', 'content-range': 'bytes 2-4/10' }); s.end('234'); return; }
@@ -46,6 +53,76 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   async function check(name, f) { if (process.argv.includes('--prefetch') && !name.startsWith('prefetch:')) return; if (process.argv.includes('--extras') && !name.startsWith('extra:')) return; try { await f(); console.log('PASS ' + name); } catch (e) { failures++; console.error('FAIL ' + name + ': ' + e.message); } }
   const harnesses = [];
   const hload = (fn, overrides) => { const h = load(fn, overrides); harnesses.push(h); return h; };
+  await check('web: stream, prefetch, download and compatibility input retain browser identity', async () => {
+    const h = hload(async () => ({ url: base + '/web-identity', source: 'web', vid: '11' }));
+    const before = hits;
+    const p = await h.handlers['prepare-online-play']({}, { vid: '11' });
+    assert.equal(hits, before, 'do not probe media before playback');
+    const response = await h.protocols['hongguo-stream'](new Request(p.url, { headers: { range: 'bytes=2-4' } }));
+    assert.equal(response.status, 206); assert.equal(await response.text(), '234');
+    assert.equal((await h.handlers['prepare-online-play']({}, { vid: '12', prefetch: true })).success, true);
+    assert.equal((await h.context.fetchDecryptedEpisode('13')).toString(), '0123456789');
+    const task = { id: 'web', type: 'hongguo', filename: 'web.mp4', customDir: root, hongguoInfo: { vid: '14' } };
+    await h.context.executeHongguoDownload(task); assert.equal(task.status, 'completed');
+  });
+  await check('web: transient HTTP failures retry once with identical method, Range and identity', async () => {
+    const h = hload(async () => ({}));
+    for (const status of [404, 410, 503]) {
+      const before = requests.length;
+      const response = await h.context.requestMedia({ url: base + '/unstable-' + status, source: 'web' }, { headers: { Range: 'bytes=2-4' } });
+      let data = ''; for await (const chunk of response.data) data += chunk;
+      assert.equal(data, '234'); assert.equal(requests.length, before + 2);
+      assert.deepEqual(requests[before], requests[before + 1]);
+    }
+  });
+  await check('web: persistent GET failure records only failed web episode; HEAD and cancellation do not', async () => {
+    const marked = [];
+    const native = { UA: 'test', WEB_UA: 'browser-test', WEB_REFERER: 'https://hongguoduanju.com/', markWebMediaFailure: info => marked.push(info.vid) };
+    const h = hload(async () => ({}), { './src/native/hongguo': native });
+    const info = { url: base + '/missing', source: 'web', vid: '11' };
+    const before = hits;
+    await assert.rejects(h.context.requestMedia(info), /HTTP 404/);
+    assert.equal(hits, before + 2); assert.deepEqual(marked, ['11']);
+    await assert.rejects(h.context.requestMedia(info, { method: 'HEAD' }));
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(h.context.requestMedia(info, { signal: controller.signal }));
+    assert.deepEqual(marked, ['11']);
+    await assert.rejects(h.context.requestMedia({ ...info, source: 'app', vid: '12' }));
+    assert.deepEqual(marked, ['11']);
+  });
+  await check('web: App identity and non-transient responses keep existing retry policy', async () => {
+    const h = hload(async () => ({}));
+    for (const [source, status] of [['app', 404], ['web', 401], ['web', 429]]) {
+      const before = hits;
+      await assert.rejects(h.context.requestMedia({ url: base + '/status-' + status, source }));
+      assert.equal(hits, before + 1);
+      assert.equal(requests.at(-1).headers['user-agent'], source === 'web' ? 'browser-test' : 'test');
+    }
+    const response = await h.context.requestMedia({ url: base + '/range', source: 'app' });
+    response.data.destroy(); assert.equal(requests.at(-1).headers.referer, undefined);
+  });
+  await check('web: real provider switches cached failed episode to App for five minutes, isolates episodes and expires', async () => {
+    let now = Date.now(), webHits = 0, appHits = 0;
+    const nativePath = path.resolve(__dirname, '../src/native/hongguo.js');
+    const nativeRequire = createRequire(nativePath);
+    const context = vm.createContext({ module: { exports: {} }, Buffer, URL, process: { env: {} }, console,
+      Date: class extends Date { static now() { return now; } },
+      require: name => name === 'axios' ? { get: async () => { webHits++; return { data: '{"main_url":"https://media.example/web.mp4"}' }; } }
+        : name === './app-source' ? { fetchAppPlayUrl: async () => { appHits++; return { url: 'https://media.example/app.mp4', source: 'app' }; } } : nativeRequire(name),
+    });
+    vm.runInContext(fs.readFileSync(nativePath, 'utf8'), context);
+    const native = context.module.exports;
+    const first = await native.fetchPlayUrlSingle('11', '1');
+    assert.equal(first.source, 'web'); assert.equal(first.vid, '11');
+    const h = hload(native.fetchPlayUrlSingle, { './src/native/hongguo': native });
+    await assert.rejects(h.context.requestMedia({ ...first, url: base + '/missing' }));
+    assert.equal((await native.fetchPlayUrlSingle('11', '1')).source, 'app', 'failed cached URL must not be returned again');
+    assert.equal((await native.fetchPlayUrlSingle('11', '1', { force: true })).source, 'app');
+    assert.equal(webHits, 1); assert.equal(appHits, 2);
+    assert.equal((await native.fetchPlayUrlSingle('22', '1')).source, 'web');
+    now += 5 * 60 * 1000 + 1;
+    assert.equal((await native.fetchPlayUrlSingle('11', '1')).source, 'web');
+  });
   await check('prefetch: plain bytes are cached and reused without another media request', async () => {
     const h = hload(async () => ({ url: base + '/range' }));
     const before = hits;

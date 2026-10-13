@@ -67,7 +67,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const shortcutModule = { exports: {} };
   vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -111,6 +111,17 @@ module.exports = { mount };
 if (require.main === module) (async () => {
   let failures = 0;
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
+  await test('online unsupported-source error reconnects once without decoder certainty or automatic transcode', async () => {
+    const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush();
+    ui.error(4); await ui.flush();
+    assert.equal(ui.prepares.length, 2); assert.equal(ui.prepares[1].force, true);
+    ui.error(4); await ui.flush();
+    assert.equal(ui.prepares.length, 2, 'reconnect must remain bounded');
+    assert.equal(ui.transcodes.length, 0, 'unavailable source is not proof of codec failure');
+    assert.ok(!ui.find(n => n.type === 'p' && n.children.includes('当前片源无法正常解码')));
+    assert.ok(ui.button('重新连接片源')); assert.ok(ui.button('转码后播放'), 'manual fallback remains available');
+    ui.unmount();
+  });
   await test('saved online episode resumes after metadata', async () => {
     const ui = mount({ saved: { vid_index: 2, currentTime: 34 } }); await ui.flush();
     assert.equal(ui.prepares.at(-1)?.vidIndex, 2, 'saved online episode must be prepared');

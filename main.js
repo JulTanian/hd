@@ -1564,16 +1564,26 @@ function bufferedMediaResponse(request, buffer) {
 async function requestMedia(playInfo, options = {}) {
   const url = new URL(playInfo.url);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('无效播放地址');
+  const web = playInfo.source === 'web';
   const config = { method: 'GET', url: url.href, responseType: 'stream', timeout: 60000, ...options,
-    headers: { 'User-Agent': hongguo.UA, 'Accept-Encoding': 'identity', ...options.headers } };
+    headers: { 'User-Agent': web ? hongguo.WEB_UA : hongguo.UA, 'Accept-Encoding': 'identity',
+      ...(web ? { Referer: hongguo.WEB_REFERER } : {}), ...options.headers } };
   let response;
-  try { response = await axios(config); }
-  catch (error) {
-    // Drain nothing from rejected bodies: destroy to release the underlying socket.
-    error.response?.data?.destroy?.();
-    if (error.response?.status !== 403) throw error;
-    try { response = await axios({ ...config, headers: { ...config.headers, Referer: hongguo.VIDEO_REFERER } }); }
-    catch (retryError) { retryError.response?.data?.destroy?.(); throw retryError; }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { response = await axios(config); break; }
+    catch (error) {
+      error.response?.data?.destroy?.();
+      const status = error.response?.status;
+      const cancelled = config.signal?.aborted || config.cancelToken?.reason || axios.isCancel(error);
+      const retryable = web ? [404, 410].includes(status) || status >= 500 && status <= 599 : status === 403;
+      if (!cancelled && attempt === 0 && retryable) {
+        if (!web) config.headers.Referer = hongguo.VIDEO_REFERER;
+        continue;
+      }
+      if (!cancelled && config.method === 'GET' && (retryable || status === 403)) hongguo.markWebMediaFailure?.(playInfo);
+      if (!cancelled && status) throw new Error(`片源请求失败（HTTP ${status}），请重新连接片源`);
+      throw error;
+    }
   }
   if ([200, 206].includes(response.status) && /(?:text\/html|application\/json)/i.test(response.headers['content-type'] || '')) {
     response.data.destroy();
