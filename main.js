@@ -1566,6 +1566,7 @@ async function requestMedia(playInfo, options = {}) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('无效播放地址');
   const web = playInfo.source === 'web';
   const config = { method: 'GET', url: url.href, responseType: 'stream', timeout: 60000, ...options,
+    ...(web ? require('./src/native/web-media-guard').webMediaRequestOptions(url.href) : {}),
     headers: { 'User-Agent': playInfo.userAgent || (web ? hongguo.WEB_UA : hongguo.UA), 'Accept-Encoding': 'identity',
       ...((playInfo.referer || web) ? { Referer: playInfo.referer || hongguo.WEB_REFERER } : {}), ...options.headers } };
   let response;
@@ -1575,6 +1576,10 @@ async function requestMedia(playInfo, options = {}) {
       error.response?.data?.destroy?.();
       const status = error.response?.status;
       const cancelled = config.signal?.aborted || config.cancelToken?.reason || axios.isCancel(error);
+      if (!cancelled && (error.code === 'ERR_WEB_MEDIA_ADDRESS' || error.cause?.code === 'ERR_WEB_MEDIA_ADDRESS')) {
+        hongguo.markWebMediaFailure?.(playInfo);
+        throw mediaTransferError('官网片源地址不安全，正在尝试其他片源');
+      }
       const retryable = web ? [404, 410].includes(status) || status >= 500 && status <= 599 : status === 403;
       if (!cancelled && attempt === 0 && retryable) {
         if (!web && !config.headers.Referer) config.headers.Referer = hongguo.VIDEO_REFERER;

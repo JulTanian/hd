@@ -16,6 +16,12 @@ function load(fetchPlayUrlSingle, overrides = {}) {
   Object.assign(app, { getVersion: () => 'test', getPath: () => root, commandLine: { appendSwitch() {} }, whenReady: () => ({ then() {} }) });
   const electron = { app, ipcMain: { handle: (n, f) => handlers[n] = f }, protocol: { registerSchemesAsPrivileged() {}, handle: (n, f) => protocols[n] = f } };
   const native = { fetchPlayUrlSingle, UA: 'test', WEB_UA: 'browser-test', WEB_REFERER: 'https://hongguoduanju.com/', VIDEO_REFERER: 'https://example.com/', deriveKey: () => Buffer.alloc(16), decryptMp4Buffer: b => b };
+  // These transport fixtures intentionally use a loopback server; the real guard has its own boundary tests.
+  const mediaGuard = req('./src/native/web-media-guard');
+  overrides = { './src/native/web-media-guard': { webMediaRequestOptions: value => {
+    if (new URL(value).hostname === '127.0.0.1') return {};
+    return mediaGuard.webMediaRequestOptions(value);
+  } }, ...overrides };
   const context = vm.createContext({ require: n => overrides[n] || (n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root }) } : req(n)), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   context.registerStreamProtocol();

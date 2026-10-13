@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('node:url');
 const { normalizeDownloadQuality } = require('./download-quality');
+const { isPublicMediaUrl } = require('./web-media-guard');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
@@ -277,7 +278,7 @@ async function fetchPlayUrlFromWeb(vid, sid) {
             (video['@id'] && !matchesPlayer(video['@id']))) continue;
         let videoUrl;
         try { videoUrl = new URL(normalizeVideoUrl(video.contentUrl)); } catch (_) { continue; }
-        if (!['https:', 'http:'].includes(videoUrl.protocol) || videoUrl.username || videoUrl.password) continue;
+        if (!isPublicMediaUrl(videoUrl.href)) continue;
         return { url: videoUrl.href, spadeA: null, codec: '', source: 'web', vid: String(vid), userAgent: WEB_UA, referer: WEB_REFERER };
       }
     } catch (e) {
