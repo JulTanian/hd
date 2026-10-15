@@ -23,18 +23,18 @@
 
 ## 下载与安装
 
-**当前正式版：1.72**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
+**当前正式版：1.73**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
 
-| 设备 | 下载 1.72 | 安装方式 |
+| 设备 | 下载 1.73 | 安装方式 |
 |---|---|---|
-| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.72/Hongguo-1.72-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.72/Hongguo-1.72-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Windows x64 | [下载 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.72/hongguo-downloader-1.72.0-win-x64.exe) · [下载 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.72/hongguo-downloader-1.72.0-win-x64.zip) | 便携版，直接运行 EXE；ZIP 解压后运行同一程序 |
+| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.73/Hongguo-1.73-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
+| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.73/Hongguo-1.73-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
+| Windows x64 | [下载 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.73/hongguo-downloader-1.73.0-win-x64.exe) · [下载 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.73/hongguo-downloader-1.73.0-win-x64.zip) | 便携版，直接运行 EXE；ZIP 解压后运行同一程序 |
 
-[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.72 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.72) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.72/SHA256SUMS.txt)
+[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.73 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.73) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.73/SHA256SUMS.txt)
 
 - **更新旧版**：先退出应用，再替换程序，保留原有用户资料目录。软件只提示更新，不会自动下载或安装。
-- **Mac**：1.72 两种架构的应用与 DMG 均已完成 Developer ID 签名、Apple 公证及票据装订；无需全局关闭 Gatekeeper。公证不等于 App Store 审核或内容授权。
+- **Mac**：1.73 两种架构的应用与 DMG 均已完成 Developer ID 签名、Apple 公证及票据装订；无需全局关闭 Gatekeeper。公证不等于 App Store 审核或内容授权。
 - **Windows**：EXE 尚未签名，可能出现系统安全提示。请核对下载来源；首次启动会展开临时运行文件，设置与观看记录仍保存在用户资料目录。
 - **普通使用只需安装包**：Assets 中的 `source` 文件和 GitHub 自动生成的 Source code 是源码，不能直接运行。
 
@@ -46,6 +46,10 @@
 2. 在「发现短剧」浏览，或在「搜索与下载」输入剧名、红果分享链接或剧集 ID。
 3. 打开详情点「立即播放」，也可选择集数与清晰度加入下载队列。
 4. 下次从「我的剧库」或「观看记录」接着看；下载进度、失败重试和整剧合并在「下载管理」。
+
+## 1.73 下载自动重试
+
+临时传输故障按 10、30、60 秒自动重试；下载管理显示等待状态、轮次和时间，支持立即重试或停止。详见 [1.73 更新说明](docs/release-1.73.md)。
 
 ## 1.72 播放与下载修复
 
@@ -277,9 +281,9 @@ https://github.com/user-attachments/assets/b95f4f60-b57c-495f-a30e-62ac2b0bda11
 
 ## 版本与验证范围
 
-当前正式版为 **1.72**，源码配置版本为 `1.72.0`。具体安装包、签名公证与验证记录，以[对应发行页](https://github.com/jackotom/hongguo-drama/releases)为准。
+当前正式版为 **1.73**，源码配置版本为 `1.73.0`。具体安装包、签名公证与验证记录，以[对应发行页](https://github.com/jackotom/hongguo-drama/releases)为准。
 
-1.72 两种 Mac 架构的 App 和 DMG 均已签名、公证并装订票据，安装包挂载后代码与媒体工具核验一致。最终 Mac 包使用隔离资料播放正常视频，验证普通横屏、原生全屏、竖屏和必要交互。Windows 云端成品 10 项检查通过，包含普通横屏隐藏。下载恢复与安全连接池回归通过；受控分段请求连接数由12降至1，但不代表已确定所有真实网络卡顿的根因。
+1.73 两种 Mac 架构的 App 和 DMG 均已签名、公证并装订票据，安装包挂载后代码与媒体工具核验一致。Mac 成品代码使用隔离资料验证等待重试、立即重试、停止及正常本地视频播放；故障由受控模拟提供。Windows 云端成品检查通过，EXE 未签名。下载重试 14 项、下载界面 13 项及媒体恢复回归通过；真实上游与长期下载不保证全部成功。
 
 **尚未覆盖**：实体 Windows 11、全部显卡、实体 Intel Mac、启用 Gatekeeper 的干净环境、Windows 真实网络弹幕及长期播放。云端检查和公证不能代替所有设备与网络环境的实测。
 
