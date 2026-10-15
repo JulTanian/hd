@@ -19,6 +19,9 @@ const STATUS_ORDER = {
   completed: 4,
 };
 
+const isWaitingRetry = task => task.status === 'failed' && !!task.retryAt;
+const needsManualRetry = task => task.status === 'stopped' || task.status === 'failed' && !isWaitingRetry(task);
+
 function sortTasks(list) {
   const key = task => task.hongguoInfo?.series_id != null ? `series:${task.hongguoInfo.series_id}` : `task:${task.id}`;
   const groups = new Map();
@@ -329,7 +332,7 @@ function DownloadManager({ onNavigate, active = true }) {
 
   // 重试失败/已停止的任务
   const retryAllFailed = async () => {
-    const ids = tasks.filter((t) => t.status === 'failed' || t.status === 'stopped').map((t) => t.id);
+    const ids = tasks.filter(needsManualRetry).map((t) => t.id);
     if (ids.length === 0) return;
     const res = await window.electronAPI.retryTasks(ids);
     await refresh();
@@ -342,7 +345,7 @@ function DownloadManager({ onNavigate, active = true }) {
 
   // 一键选中全部失败/已停止的任务（选中后可再点「重试选中」）
   const selectAllFailed = () => {
-    const ids = tasks.filter((t) => t.status === 'failed' || t.status === 'stopped').map((t) => t.id);
+    const ids = tasks.filter(needsManualRetry).map((t) => t.id);
     if (ids.length === 0) {
       showToast('没有失败或已停止的任务');
       return;
@@ -367,8 +370,9 @@ function DownloadManager({ onNavigate, active = true }) {
 
   const activeCount = tasks.filter((t) => t.status === 'downloading' || t.status === 'pending').length;
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
+  const retryingCount = tasks.filter(isWaitingRetry).length;
   const failedTasks = useMemo(
-    () => tasks.filter((t) => t.status === 'failed' || t.status === 'stopped'),
+    () => tasks.filter(needsManualRetry),
     [tasks]
   );
   const failedCount = failedTasks.length;
@@ -399,13 +403,14 @@ function DownloadManager({ onNavigate, active = true }) {
         </div>
         <div className="dm-stats">
           <span className="stat stat-active">进行中 {activeCount}</span>
+          {retryingCount > 0 && <span className="stat stat-active">等待重试 {retryingCount}</span>}
           <span className="stat stat-done">已完成 {completedCount}</span>
           <span className="stat stat-fail">失败/停止 {failedCount}</span>
         </div>
       </div>
 
       <div className="dm-usage-notice" role="note" aria-label="下载风险与使用倡议">
-        <p><strong>下载仍可能失败。</strong>平台风控可能限制取址；App 取址已采用每次请求更换合成设备标识符的方式尝试绕过按设备限制，但不保证所有剧集可用或下载成功。失败任务会保留，可稍后重试。</p>
+        <p><strong>临时故障会自动重试。</strong>红果片源下载遇到断网、超时或传输不完整时，最多追加 3 次重试，分别等待 10、30、60 秒；取源暂不可用时等待 3、8、15 分钟。等待期间可停止或立即重试。权限限制、磁盘错误等需手动处理；重试后仍失败的任务会保留。</p>
         <p>本软件用于学习研究，建议体验后 24 小时内自行删除；请勿冒充官方或以虚假授权名义收费。开源权利义务以 GPLv3 为准。上述倡议不代表获得平台或版权方授权，也不构成免责承诺。</p>
       </div>
 
@@ -624,8 +629,8 @@ function DownloadManager({ onNavigate, active = true }) {
           {visibleTasks.map((task) => {
 
             const isSel = selected.has(task.id);
-            const isActive = task.status === 'downloading' || task.status === 'pending';
-            const canStop = task.status === 'downloading';
+            const waitingRetry = isWaitingRetry(task);
+            const canStop = task.status === 'downloading' || task.status === 'pending' || waitingRetry;
             const canRetry = task.status === 'failed' || task.status === 'stopped';
             const pct = task.progress || 0;
             return (
@@ -641,7 +646,8 @@ function DownloadManager({ onNavigate, active = true }) {
                 <div className="dm-task-body">
                   <div className="dm-task-title">{task.title || task.filename}</div>
                   <div className="dm-task-meta">
-                    <span className={`status-tag status-${task.status}`}>{STATUS_TEXT[task.status] || task.status}</span>
+                    <span className={`status-tag status-${waitingRetry ? 'pending' : task.status}`}>{waitingRetry ? '等待重试' : STATUS_TEXT[task.status] || task.status}</span>
+                    {waitingRetry && <span className="dm-size">自动重试 {task.sourceRetries}/3 · {new Date(task.retryAt).toLocaleTimeString('zh-CN', { hour12: false })} 后排队</span>}
                     {task.status === 'downloading' && task.totalBytes > 0 && (
                       <span className="dm-size">{fmtBytes(task.receivedBytes)} / {fmtBytes(task.totalBytes)}</span>
                     )}
@@ -658,12 +664,23 @@ function DownloadManager({ onNavigate, active = true }) {
                 </div>
                 <div className="dm-task-actions" onClick={(e) => e.stopPropagation()}>
                   {canStop && (
-                    <button className="icon-btn" title="停止" onClick={() => { window.electronAPI.stopDownload(task.id); refresh(); }}>
+                    <button className="icon-btn" title={waitingRetry ? '停止自动重试' : '停止'} onClick={async () => {
+                      try {
+                        const result = await window.electronAPI.stopDownload(task.id);
+                        if (!result?.success) throw new Error(result?.error || '停止失败');
+                        await refresh();
+                      } catch (error) { showToast(error.message || '停止失败', 'error'); }
+                    }}>
                       <Square size={16} />
                     </button>
                   )}
                   {canRetry && (
-                    <button className="icon-btn" title="重试" onClick={() => { window.electronAPI.retryTask(task.id); }}>
+                    <button className="icon-btn" title={waitingRetry ? '立即重试' : '重试'} onClick={async () => {
+                      try {
+                        const result = await window.electronAPI.retryTask(task.id);
+                        if (!result?.success) throw new Error(result?.error || '重试失败');
+                      } catch (error) { showToast(error.message || '重试失败', 'error'); }
+                    }}>
                       <RefreshCw size={16} />
                     </button>
                   )}

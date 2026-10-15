@@ -45,6 +45,28 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
 (async () => {
   let failures = 0, passed = 0;
   const test = async (name, fn) => { if (process.argv[2] && !new RegExp(process.argv[2]).test(name)) return; try { await fn(); passed++; } catch (error) { failures++; console.error(`FAIL ${name}: ${error.stack}`); } };
+  await test('automatic retry is visible, stoppable and separate from terminal failures', async () => {
+    let stopped, retried;
+    const ui = mount({getDownloadTasks: async () => [task(1)],
+      stopDownload: async id => { stopped = id; return {success:true}; },
+      retryTask: async id => { retried = id; return {success:true}; }});
+    await ui.flush();
+    ui.emit('onDownloadFailed', {id:'t1', error:'网络断开', retryAt:Date.now()+30000, sourceRetries:1});
+    ui.advance(250); await ui.flush();
+    assert.ok(ui.text().includes('等待重试 1'));
+    assert.ok(ui.text().includes('失败/停止 0'));
+    assert.equal(ui.button('重试失败').props.disabled, true);
+    assert.ok(ui.text().includes('自动重试 1/3'));
+    const retry = ui.find(n => n.type === 'button' && n.props.title === '立即重试');
+    assert.ok(retry); await retry.props.onClick(); assert.equal(retried, 't1');
+    const stop = ui.find(n => n.type === 'button' && n.props.title === '停止自动重试');
+    assert.ok(stop); await stop.props.onClick(); assert.equal(stopped, 't1');
+    ui.emit('onDownloadFailed', {id:'t1',error:'重试耗尽',retryAt:null,sourceRetries:3});
+    ui.advance(250); await ui.flush();
+    assert.ok(!ui.text().includes('等待重试 1'));
+    assert.ok(ui.text().includes('失败/停止 1'));
+    ui.unmount();
+  });
   await test('merge selector requests downloaded files and refreshes after completion and deletion', async () => {
     let list = [], options;
     const ui = mount({ getSeriesList: async value => { options = value; return list; }, getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => { list = []; return { success: true, count: 1, freed: 120000 }; } });

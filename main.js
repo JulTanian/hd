@@ -504,6 +504,7 @@ function enqueuePendingTasks() {
 
 // Give temporary source/transport failures a bounded recovery window.
 const SOURCE_RETRY_DELAYS = [3, 8, 15].map(minutes => minutes * 60000);
+const TRANSFER_RETRY_DELAYS = [10, 30, 60].map(seconds => seconds * 1000);
 const sourceRetryTimers = new Map();
 
 function isDeferrableSourceError(task, error) {
@@ -514,7 +515,8 @@ function isDeferrableSourceError(task, error) {
       item.source === 'web' || /^(?:TIMEOUT|NETWORK_ERROR|HTTP_(?:408|5\d\d))$/.test(item.code));
   }
   if (error?.mediaStatus === 408 || error?.mediaStatus >= 500 && error?.mediaStatus <= 599) return true;
-  if (['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'ERR_BAD_RESPONSE', 'ERR_STREAM_PREMATURE_CLOSE', 'EAI_AGAIN'].includes(error?.code)) return true;
+  if (['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'ERR_BAD_RESPONSE', 'ERR_STREAM_PREMATURE_CLOSE', 'EAI_AGAIN',
+    'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'ECONNREFUSED', 'ERR_NETWORK', 'MEDIA_TRANSFER_ERROR'].includes(error?.code)) return true;
   return [404, 410].includes(error?.mediaStatus) && normalizeDownloadQuality(task.downloadQuality) === 'auto';
 }
 
@@ -533,6 +535,7 @@ function armSourceRetry(task) {
     catch (error) {
       // store reports storage-error; keep the plan for manual retry or the next launch.
       task.status = 'failed'; task.error = storageError?.error || error.message;
+      delete task.retryAt;
       downloadQueue = downloadQueue.filter(t => t.id !== task.id);
       sendToRenderer('download-queue-changed', {});
       return;
@@ -773,12 +776,15 @@ async function executeHongguoDownload(task) {
       const retries = task.sourceRetries || 0;
       task.status = 'failed'; task.error = error.message; task.endTime = Date.now();
       if (retries < SOURCE_RETRY_DELAYS.length && isDeferrableSourceError(task, error)) {
-        const delay = SOURCE_RETRY_DELAYS[retries];
+        const delays = error.code === 'SOURCE_UNAVAILABLE' || [404, 410].includes(error.mediaStatus)
+          ? SOURCE_RETRY_DELAYS : TRANSFER_RETRY_DELAYS;
+        const delay = delays[retries];
         task.sourceRetries = retries + 1; task.retryAt = Date.now() + delay;
-        task.error = `${error.message} 将在 ${delay / 60000} 分钟后自动重试（${retries + 1}/${SOURCE_RETRY_DELAYS.length}）。`;
+        const wait = delays === SOURCE_RETRY_DELAYS ? `${delay / 60000} 分钟` : `${delay / 1000} 秒`;
+        task.error = `${error.message} 将在 ${wait}后自动重试（${retries + 1}/${SOURCE_RETRY_DELAYS.length}）。`;
         armSourceRetry(task);
       }
-      sendToRenderer('download-failed', { id, error: task.error });
+      sendToRenderer('download-failed', { id, error: task.error, retryAt: task.retryAt || null, sourceRetries: task.sourceRetries || 0 });
     }
     saveDownloadTasks();
   } finally {
@@ -1747,7 +1753,7 @@ async function requestMedia(playInfo, options = {}) {
       const cancelled = config.signal?.aborted || config.cancelToken?.reason || axios.isCancel(error);
       if (!cancelled && (error.code === 'ERR_WEB_MEDIA_ADDRESS' || error.cause?.code === 'ERR_WEB_MEDIA_ADDRESS')) {
         hongguo.markWebMediaFailure?.(playInfo);
-        throw mediaTransferError('官网片源地址不安全，正在尝试其他片源');
+        throw Object.assign(mediaTransferError('官网片源地址不安全，正在尝试其他片源'), { code: 'ERR_WEB_MEDIA_ADDRESS' });
       }
       const retryable = web ? [404, 410].includes(status) || status >= 500 && status <= 599 : status === 403;
       if (!cancelled && attempt === 0 && retryable) {
@@ -1780,7 +1786,7 @@ async function requestMedia(playInfo, options = {}) {
 }
 
 function mediaTransferError(message) {
-  return Object.assign(new Error(message), { mediaRetryable: true });
+  return Object.assign(new Error(message), { code: 'MEDIA_TRANSFER_ERROR', mediaRetryable: true });
 }
 
 function awaitMediaOperation(promise, signal, timeout = 0) {

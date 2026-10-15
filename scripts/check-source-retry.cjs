@@ -14,21 +14,23 @@ const unavailable = (sources) => ({ url: null, code: 'SOURCE_UNAVAILABLE', sourc
   error: '本集取源失败：网页：请求失败（HTTP 404）；App：接口暂时拒绝本次请求；旧接口：片源数据无法解析。请重试或在官方 App 确认可播情况。' });
 const webGone = [{ source: 'web', code: 'HTTP_404' }, { source: 'app', code: 'BUSINESS_REJECTED' }, { source: 'api', code: 'INVALID_RESPONSE' }];
 function fixture(initialTasks) {
+  const now = Date.now();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-source-retry-'));
   dirs.push(root);
   const handlers = {}, timers = [], app = new EventEmitter(), state = { result: unavailable(webGone), calls: 0, qualities: [] };
   let settings = { root }, saved = initialTasks, ready, reportStorageError;
   Object.assign(app, { getVersion: () => 'test', getPath: () => root,
     commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then(fn) { ready = fn; } }) });
-  // Long timers are the scheduled source retries; fire them manually instead of waiting minutes.
+  // Scheduled retries are fired manually; immediate recovery still uses short timers.
   const fakeSetTimeout = (fn, ms, ...args) => {
-    if (ms < 60000) return setTimeout(fn, Math.min(ms, 5), ...args);
-    const timer = { fn, ms, cleared: false }; timers.push(timer); return timer;
+    if (ms < 10000) return setTimeout(fn, Math.min(ms, 5), ...args);
+    const timer = { fn, ms, cleared: false, unref() { this.background = true; return this; } }; timers.push(timer); return timer;
   };
   const fakeClearTimeout = timer => { if (timer && 'cleared' in timer) timer.cleared = true; else clearTimeout(timer); };
   const context = vm.createContext({ require: n => n === 'electron'
     ? { app, ipcMain: { handle: (n, f) => handlers[n] = f }, protocol: { registerSchemesAsPrivileged() {} },
       Menu: { buildFromTemplate: items => items, setApplicationMenu() {} } }
+    : n === 'axios' ? Object.assign((...args) => state.transportError ? Promise.reject(state.transportError) : req(n)(...args), req(n))
     : n === './src/native/hongguo' ? { fetchPlayUrlSingle: async (_vid, _sid, options) => { state.calls++; state.qualities.push(options.quality); return state.result; }, markWebMediaFailure() {} }
     : n === './src/store' ? { getSettings: () => settings, saveSettings: s => settings = s,
       init() {}, getTasks: () => JSON.parse(JSON.stringify(saved || [])), getSeries: () => [], getMergeTasks: () => [],
@@ -37,18 +39,18 @@ function fixture(initialTasks) {
         if (state.saveError) { reportStorageError({ error: '保存失败，请检查磁盘空间或目录权限；本次变更未能保存。' }); throw state.saveError; }
         saved = JSON.parse(JSON.stringify(tasks));
       } } : req(n),
-    __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} },
+    __dirname: path.dirname(source), Date: class extends Date { static now() { return now; } }, console: { log() {}, warn() {}, error() {} },
     process, Buffer, URL, Response, Request, Headers, AbortController, setInterval: () => ({ unref() {} }), setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
     testReadStream: () => Readable.from([Buffer.alloc(200000)]) });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   const run = text => vm.runInContext(text, context);
-  run(`const originalPumpQueue = pumpQueue; pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
+  run(`const originalPumpQueue = pumpQueue, originalRequestMedia = requestMedia; pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
     probeVideoInfo = async () => ({ w: 1080, h: 1920, duration: 12, codec: 'h264' });
     requestMedia = async () => ({headers: {'content-length': '200000'}, data: testReadStream()});
     downloadTasks = [{ id: 't1', type: 'hongguo', status: 'pending', filename: 'ep13.mp4', downloadQuality: 'auto',
       hongguoInfo: { vid: '7688671683959327768', series_id: '1', series_title: '测试剧', vid_index: 13 } }];`);
   const task = () => run('downloadTasks[0]');
-  const live = () => timers.filter(timer => !timer.cleared);
+  const live = () => timers.filter(timer => !timer.cleared && !timer.background);
   return { run, handlers, state, timers, live, task, saved: () => saved,
     start: async () => {
       // Keep the actual app.whenReady callback, loadDownloadTasks and retry scheduling.
@@ -61,6 +63,76 @@ function fixture(initialTasks) {
     fire: () => { const timer = live().at(-1); timer.cleared = true; timer.fn(); } };
 }
 const checks = [
+  ['real media error wrapping preserves a security block without deferred retries', async () => {
+    const h = fixture();
+    h.state.result = {url:'https://media.example/video.mp4',source:'app'};
+    h.state.transportError = Object.assign(new Error('blocked'), {cause:{code:'ERR_WEB_MEDIA_ADDRESS'}});
+    h.run('requestMedia = originalRequestMedia');
+    await h.download();
+    assert.equal(h.task().status,'failed');
+    assert.equal(h.live().length,0,'security rejection must not turn into a scheduled network retry');
+  }],
+  ['network outages and incomplete bodies recover with a bounded short delay', async () => {
+    for (const code of ['ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'ECONNREFUSED', 'ECONNRESET', 'ERR_NETWORK', 'incomplete']) {
+      const h = fixture();
+      h.state.result = { url: 'https://media.example/video.mp4', source: 'app' };
+      h.run(code === 'incomplete'
+        ? `requestMedia = async () => ({headers: {'content-length': '300000'}, data: testReadStream()});`
+        : `requestMedia = async () => { throw Object.assign(new Error('offline'), { code: '${code}' }); };`);
+      for (const [index, seconds] of [10, 30, 60].entries()) {
+        await h.download();
+        assert.equal(h.task().status, 'failed');
+        assert.equal(h.live().length, 1, `${code}: must schedule recovery`);
+        assert.equal(h.live()[0].ms, seconds * 1000);
+        assert.equal(h.task().sourceRetries, index + 1);
+        assert.match(h.task().error, new RegExp(`${seconds} 秒后自动重试`));
+        assert.equal(fs.existsSync(h.task().savePath), false, 'never publish partial media');
+        h.fire();
+      }
+      await h.download();
+      assert.equal(h.live().length, 0, 'no infinite retry loop');
+      assert.equal(h.task().retryAt, undefined);
+    }
+  }],
+  ['short retry succeeds without overwriting completed files and stops on cancellation', async () => {
+    const h = fixture();
+    h.state.result = { url: 'https://media.example/video.mp4', source: 'app' };
+    h.run(`requestMedia = async () => { throw Object.assign(new Error('offline'), {code: 'ENOTFOUND'}); };`);
+    await h.download();
+    assert.equal(h.live().length, 1);
+    h.fire();
+    h.run(`requestMedia = async () => ({headers: {'content-length': '200000'}, data: testReadStream()});`);
+    await h.download();
+    assert.equal(h.task().status, 'completed');
+    const before = fs.readFileSync(h.task().savePath);
+    h.run(`requestMedia = async () => { throw new Error('completed files must not be downloaded again'); };`);
+    await h.download();
+    assert.equal(h.task().status, 'completed');
+    assert.deepEqual(fs.readFileSync(h.task().savePath), before);
+    for (const action of ['stop-download', 'pause-all']) {
+      const g = fixture();
+      g.state.result = h.state.result;
+      g.run(`requestMedia = async () => { throw Object.assign(new Error('offline'), {code: 'ENOTFOUND'}); };`);
+      await g.download();
+      const timer = g.live()[0];
+      assert.ok(timer);
+      await g.handlers[action]({}, 't1');
+      timer.fn();
+      assert.equal(g.task().status, 'stopped');
+      assert.equal(g.live().length, 0);
+      assert.equal(g.run('downloadQueue.length'), 0);
+    }
+  }],
+  ['disk errors, security blocks and access refusals never schedule transport retries', async () => {
+    for (const failure of [{code:'ENOSPC'}, {code:'EACCES'}, {code:'ERR_WEB_MEDIA_ADDRESS',mediaRetryable:true},
+      {mediaStatus:401,mediaRetryable:true}, {mediaStatus:403,mediaRetryable:true}, {mediaStatus:429,mediaRetryable:true}]) {
+      const h = fixture();
+      h.state.result = {url:'https://media.example/video.mp4',source:'app'};
+      h.run(`requestMedia = async () => { throw Object.assign(new Error('unrecoverable'), ${JSON.stringify(failure)}); };`);
+      await h.download();
+      assert.equal(h.live().length, 0, JSON.stringify(failure));
+    }
+  }],
   ['web 404 plus App rejection schedules bounded delayed retries', async () => {
     const h = fixture();
     for (const [index, minutes] of [3, 8, 15].entries()) {
@@ -177,7 +249,8 @@ const checks = [
     h.state.saveError = Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
     assert.doesNotThrow(() => h.fire(), 'storage errors must not escape the timer');
     assert.equal(h.task().status, 'failed');
-    assert.equal(h.task().retryAt, retryAt, 'keep the previous recoverable plan');
+    assert.equal(h.task().retryAt, undefined, 'no active timer: expose manual retry in the current UI');
+    assert.equal(h.saved()[0].retryAt, retryAt, 'keep the previous durable plan for restart recovery');
     assert.equal(h.run('downloadQueue.length'), 0, 'failed persistence removes this automatic queue entry');
     assert.equal(h.live().length, 0, 'do not create an automatic write-failure loop');
     assert.match(h.run('storageError.error'), /保存失败/);
