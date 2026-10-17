@@ -64,6 +64,21 @@ const checks = [
       assert.equal(result.url, mediaUrl('low')); assert.equal(result.quality, '720P');
     }
   }],
+  ['auto uses actual dimensions when labels are missing or overstate quality', async () => {
+    for (const label of ['1080p', '']) {
+      const result = await appFixture({
+        low: { ...stream('low', 360, 640), definition: label },
+        high: { ...stream('high', 1920, 1080), definition: '720p' },
+      }).fetchAppPlayUrl('11');
+      assert.equal(result.url, mediaUrl('high'));
+      assert.equal(result.variants[1].url, mediaUrl('low'), 'lower stream remains available for media recovery');
+    }
+    const nested = await appFixture({
+      low: { main_url: mediaUrl('low'), video_meta: { codec_type: 'h264', vwidth: 360, vheight: 640 } },
+      high: { main_url: mediaUrl('high'), video_meta: { codec_type: 'h264', vwidth: 1080, vheight: 1920 } },
+    }).fetchAppPlayUrl('11');
+    assert.equal(nested.url, mediaUrl('high'));
+  }],
   ['unknown quality is rejected before network or third-party dispatch', async () => {
     const app = appFixture({ one: stream('one', 1080, 1920) });
     await assert.rejects(app.fetchAppPlayUrl('11', { quality: '4k' }), /清晰度/); assert.equal(app.calls.length, 0);

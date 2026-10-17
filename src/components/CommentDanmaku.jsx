@@ -73,7 +73,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
   const nodes = useRef(new Map());
   const [items, setItems] = useState([]);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const { running, settings, comments, status, error, loading, feed } = danmaku;
+  const { running, settings, comments, feed } = danmaku;
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -146,7 +146,6 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
       {(comments.length ? items : EMPTY).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}
         style={{ transform: `translate(${item.x}px, ${item.y}px)` }}>{item.text}</span>)}
     </div>
-    {((loading && !items.length) || error || !comments.length || (feed.notice && !items.length)) && <span className="comment-danmaku-status" role="status">{status}</span>}
   </div>;
 }
 

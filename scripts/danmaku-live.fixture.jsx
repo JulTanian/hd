@@ -15,8 +15,8 @@ window.testResult = (async () => {
   const frames = new Map();
   window.requestAnimationFrame = callback => { frames.set(++serial, callback); return serial; };
   window.cancelAnimationFrame = id => frames.delete(id);
-  const render = () => act(async () => root.render(<div style={{ position: 'relative', width: 800, height: 600 }}>
-    <CommentDanmaku videoRef={videoRef} source="fixture" available danmaku={{ running: true, settings, comments: feed.comments, feed }} />
+  const render = (status = {}) => act(async () => root.render(<div style={{ position: 'relative', width: 800, height: 600 }}>
+    <CommentDanmaku videoRef={videoRef} source="fixture" available danmaku={{ running: true, settings, comments: feed.comments, feed, ...status }} />
   </div>));
   const advance = async count => { for (let i = 0; i < count; i++) await act(async () => {
     now += 100; const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(now));
@@ -27,6 +27,15 @@ window.testResult = (async () => {
   document.head.append(style);
   const snapshot = () => feed.animation.items.map(item => ({ ...item, node: [...document.querySelectorAll('.comment-danmaku-item')].find(node => node.textContent === item.text) }));
   try {
+    for (const status of [
+      { loading: true, status: '正在加载本集评论…' },
+      { error: '本集评论加载失败，可重试继续加载', status: '本集评论加载失败，可重试继续加载' },
+      { comments: [], status: '本集暂无可显示的公开评论' },
+      { feed: { ...feed, notice: '官网仅提供本集部分评论' }, status: '官网仅提供本集部分评论' },
+    ]) {
+      await render(status);
+      assert(!document.querySelector('.comment-danmaku').textContent.includes(status.status), `Comment status obstructed video: ${status.status}`);
+    }
     await render(); await advance(34);
     await act(async () => { video.paused = true; video.dispatchEvent(new Event('pause')); });
     const before = snapshot(), cursor = feed.animation.cursor;
@@ -56,7 +65,7 @@ window.testResult = (async () => {
     const items = feed.animation.items;
     for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++)
       assert(Math.abs(items[i].y - items[j].y) >= settings.fontSize + 12, 'Settings caused overlapping lanes');
-    return { passed: true, preservedComments: before.length, checks: ['DOM identity, text, x, age, cursor', 'paused opacity/font/width', 'selective filtering', 'live speed', 'safe lane admission after area/density changes'] };
+    return { passed: true, preservedComments: before.length, checks: ['loading/error/empty/limited status stays off video', 'DOM identity, text, x, age, cursor', 'paused opacity/font/width', 'selective filtering', 'live speed', 'safe lane admission after area/density changes'] };
   } catch (error) { return { passed: false, error: error.message }; }
   finally { await act(async () => root.unmount()); }
 })();

@@ -1,0 +1,112 @@
+// Offline renderer and main IPC regressions; no user data or external media.
+const assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const { mount } = require('./check-player-resume.cjs');
+const poll = async ui => { await [...ui.timers.values()].find(t => t.delay === 2000).fn(); await ui.flush(); };
+const select = ui => ui.find(n => n.type === 'select' && n.props['aria-label'] === '在线播放清晰度');
+const alert = ui => ui.find(n => n.props.role === 'alert');
+const text = n => typeof n === 'string' ? n : n?.children?.map(text).join('') || '';
+let failures = 0;
+async function check(name, fn) { try { await fn(); console.log('PASS ' + name); } catch (e) { failures++; console.error('FAIL ' + name + ': ' + e.message); } }
+(async () => {
+if (process.argv[2] !== 'main') {
+  await check('scheduled source retry stays waiting and terminal error remains visible', async () => {
+    let status = 'missing', retryAt = null, error = '';
+    const ui = mount({ props: {target:{seriesId:'A',vidIndex:1,ts:1}}, prepare: async()=>({success:false,error:'取源失败'}),
+      apiOverrides: { getSeriesEpisodes: async()=>({success:true,data:{series_id:'A',episodes:[{vid:'v1',vid_index:1,status,retryAt,error}]}}),
+        downloadSingleEpisode: async()=>{status='pending';return {success:true};} } });
+    await ui.flush(); status='failed'; retryAt=Date.now()+5000; error='官网限流，等待自动重试'; await poll(ui);
+    assert(ui.button('取消等待'), 'scheduled retry must retain playback intent');
+    retryAt=null; error='当前片源没有 1080P，未自动降级'; await poll(ui);
+    assert.equal(ui.button('取消等待'),undefined); assert.match(text(alert(ui)),/当前片源没有 1080P/); ui.unmount();
+  });
+  await check('online selection preserves time through prefetch, reconnect, transcode and episode switch', async()=>{
+    const ui=mount({local:true}); await ui.flush(); ui.metadata(); ui.media.currentTime=24;
+    assert(select(ui),'independent online quality selector required');
+    select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush();
+    assert.equal(ui.prepares.at(-1).quality,'1080p'); ui.metadata(); assert.equal(ui.media.currentTime,24);
+    ui.find(n=>n.type==='video').props.onTimeUpdate({currentTarget:ui.media}); await ui.flush();
+    assert(ui.prepares.some(p=>p.prefetch && p.quality==='1080p'));
+    ui.error(2); await ui.flush(); assert.equal(ui.prepares.at(-1).quality,'1080p');
+    ui.metadata(); ui.error(3); await ui.flush(); assert.equal(ui.transcodes.at(-1).quality,'1080p'); assert.equal(ui.transcodes.at(-1).filePath,null);
+    ui.episode(2); await ui.flush(); assert.equal(ui.prepares.at(-1).quality,'1080p'); ui.unmount();
+  });
+  await check('online fallback keeps explicit quality independent of download selection',async()=>{
+    const downloads=[];
+    const ui=mount({prepare:async()=>({success:false,error:'取源失败'}),settings:{download_quality:'720p'},
+      apiOverrides:{downloadSingleEpisode:async(...p)=>{downloads.push(p);return {success:false,error:'片源不足1080P'};}}});
+    await ui.flush(); assert(select(ui)); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush();
+    assert.equal(downloads.at(-1)[2],'1080p'); assert.match(text(alert(ui)),/片源不足1080P/); ui.unmount();
+  });
+  await check('online quality leaves skipped local files intact when auto-delete is enabled',async()=>{
+    const deletes=[];
+    const ui=mount({local:true,settings:{auto_delete_watched:true},apiOverrides:{deleteEpisodeFile:async(...p)=>{deletes.push(p);return {success:true,count:1};}}});
+    await ui.flush(); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush(); ui.metadata();
+    ui.find(n=>n.type==='video').props.onEnded(); await ui.flush();
+    assert.equal(deletes.length,0,'a skipped low-quality original was never played'); ui.unmount();
+  });
+  await check('remembered explicit quality skips unverified files and third-party keeps automatic playback',async()=>{
+    const storage=new Map([['hongguo:online-quality','1080p']]);
+    const ui=mount({local:true,storage}); await ui.flush();
+    assert.equal(ui.prepares.at(-1)?.quality,'1080p'); ui.unmount();
+    const third=mount({local:true,storage,seriesId:'xifan:A'}); await third.flush();
+    assert(select(third).props.disabled); assert.equal(select(third).props.value,'auto');
+    assert.equal(third.find(n=>n.type==='video').props.src,'file:///mock-1.mp4'); third.unmount();
+  });
+} else {
+  const prefix=fs.readFileSync(path.join(__dirname,'check-download-quality-integration.cjs'),'utf8').split('const checks = [')[0];
+  const module={exports:{}};
+  vm.runInNewContext(prefix+'\nmodule.exports={fixture,dirs};',{module,require,__dirname,console,process,Buffer,URL,Response,Request,Headers,AbortController,setTimeout,clearTimeout});
+  const {fixture,dirs}=module.exports;
+  try {
+    await check('episode IPC exposes retry diagnostics and verified quality',async()=>{
+      const h=fixture(); h.run("downloadTasks=[{id:'t',hongguoInfo:{series_id:'1',vid:'11',vid_index:1},savePath:'/absent',status:'failed',error:'真实错误',retryAt:123,actualQuality:'1080p'}]; collectSeriesEpisodeFiles=()=>({ordered:[]});");
+      const ep=(await h.handlers['get-series-episodes']({},'1')).data.episodes[0];
+      assert.equal(ep.retryAt,123); assert.equal(ep.error,'真实错误'); assert.equal(ep.actualQuality,'1080p');
+    });
+    await check('an existing verified download exposes quality to playback fallback',async()=>{
+      const h=fixture(); const file=path.join(h.root,'existing.mp4'); fs.writeFileSync(file,Buffer.alloc(200000));
+      h.context.existingFile=file;
+      h.run("downloadTasks=[{id:'t',hongguoInfo:{series_id:'1',vid:'11',vid_index:1},savePath:existingFile,status:'completed',downloadQuality:'auto'}];");
+      assert.equal((await h.handlers['download-single-episode']({},'1',1,'1080p')).success,true);
+      assert.equal(h.run('downloadTasks[0].actualQuality'),'1080p');
+    });
+    await check('online IPC isolates quality cache and jobs while preserving automatic requests',async()=>{
+      const h=fixture();
+      const results=await Promise.all(['auto','720p','1080p'].map(quality=>h.handlers['prepare-online-play']({}, {vid:'11',seriesId:'1',vidIndex:1,quality,prefetch:true})));
+      assert(results.every(r=>r.success));
+      assert.deepEqual(Array.from(h.calls,c=>c[2].quality),['auto','720p','1080p']); assert.equal(h.run('onlineCache.size'),3);
+      assert.equal((await h.handlers['prepare-online-play']({}, {vid:'11',quality:'bogus'})).success,false);
+      assert.equal((await h.handlers['prepare-online-play']({}, {vid:'xifan:11',quality:'1080p'})).success,false);
+      h.context.clearOnlineCache();
+    });
+    await check('explicit-quality complete cache survives upstream failure during download fallback',async()=>{
+      const h=fixture();
+      const prepared=await h.handlers['prepare-online-play']({}, {vid:'11',seriesId:'1',vidIndex:1,quality:'1080p',prefetch:true});
+      assert.equal(prepared.success,true); assert.equal(h.run("onlineCache.get('11:1080p')?.complete"),true);
+      h.run("unexpectedSources=0; hongguo.fetchPlayUrlSingle=async()=>{unexpectedSources++;throw new Error('上游不可用');};");
+      assert.equal((await h.handlers['download-single-episode']({},'1',1,'1080p')).success,true);
+      await h.run('executeHongguoDownload(downloadTasks[0])');
+      assert.equal(h.saved()[0].status,'completed'); assert.equal(h.saved()[0].actualQuality,'1080p');
+      assert.equal(fs.statSync(h.saved()[0].savePath).size,200000); assert.equal(h.run('unexpectedSources'),0);
+      h.context.clearOnlineCache();
+    });
+    await check('stream recovery preserves explicit quality before media begins',async()=>{
+      const h=fixture(); h.context.streamHandlers={};
+      h.run("mediaWithCors=handler=>handler;protocol.handle=(scheme,fn)=>streamHandlers[scheme]=fn;registerStreamProtocol();let attempts=0;requestMedia=async()=>{if(!attempts++)throw mediaTransferError('network');return {status:200,headers:{'content-length':'200000'},data:testReadStream()};};");
+      const prepared=await h.handlers['prepare-online-play']({}, {vid:'11',seriesId:'1',vidIndex:1,quality:'1080p'});
+      const response=await Object.values(h.context.streamHandlers)[0](new Request(prepared.url));
+      assert.equal(response.status,200); await response.arrayBuffer();
+      assert.equal(h.calls.length,2); assert(h.calls.every(c=>c[2].quality==='1080p')); h.context.clearOnlineCache();
+    });
+    await check('compatibility paths isolate quality and recovery passes it to the provider',async()=>{
+      const h=fixture();
+      assert.notEqual(h.context.compatPathFor('1',1,'1080p'),h.context.compatPathFor('1',1,'720p'));
+      assert.equal(path.basename(h.context.compatPathFor('1',1)),'1_001.mp4');
+      await h.context.fetchDecryptedEpisode('11',()=>{},'1',null,undefined,Infinity,false,'1080p');
+      assert.equal(h.calls[0][2].quality,'1080p');
+    });
+  } finally {for(const dir of dirs)fs.rmSync(dir,{recursive:true,force:true});}
+}
+process.exitCode=failures?1:0;
+})();

@@ -48,6 +48,12 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [cacheNextSaving, setCacheNextSaving] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [downloadQuality, setDownloadQuality] = useState('auto');
+  const [onlineQualityChoice, setOnlineQualityChoice] = useState(() => {
+    try { const value = window.localStorage.getItem('hongguo:online-quality'); return ['720p', '1080p'].includes(value) ? value : 'auto'; }
+    catch { return 'auto'; }
+  });
+  const supportsOnlineQuality = !/^(xifan|hema|custom):/.test(activeSeriesId);
+  const onlineQuality = supportsOnlineQuality ? onlineQualityChoice : 'auto';
   const [qualityLoading, setQualityLoading] = useState(true);
   const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
   const [toast, setToast] = useState(null);
@@ -88,7 +94,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const pendingAutoplayRef = useRef(true);
   const lastSavedRef = useRef(0);
   const stateRef = useRef({ currentIndex, autoNext, activeSeriesId });
-  stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor, downloadQuality, qualityLoading };
+  stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor, downloadQuality, onlineQuality, qualityLoading };
   const selectedSeriesRef = useRef('');
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
@@ -229,7 +235,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   }, []);
 
   const usableLocal = useCallback((ep, seriesId) => ep && !ep.locked && ep.status === 'completed' && ep.fileUrl
-    && localMediaKey(seriesId, ep) !== rejectedLocalRef.current, []);
+    && localMediaKey(seriesId, ep) !== rejectedLocalRef.current
+    && (stateRef.current.onlineQuality === 'auto' || /^(xifan|hema|custom):/.test(seriesId)
+      || Number.parseInt(ep.actualQuality, 10) >= Number.parseInt(stateRef.current.onlineQuality, 10)), []);
 
   const resumeLocal = useCallback((ep, seekTo, autoplay = true) => {
     resetPlayback(autoplay);
@@ -263,7 +271,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (fallbackAttemptRef.current === key) throw new Error('本集已尝试下载，请在下载管理检查或手动重试下载');
       const settings = stateRef.current.qualityLoading ? await window.electronAPI.getSettings() : null;
       if (!isCurrentFallback(intent)) return;
-      const quality = stateRef.current.qualityLoading
+      const quality = stateRef.current.onlineQuality !== 'auto' ? stateRef.current.onlineQuality : stateRef.current.qualityLoading
         ? (['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto') : stateRef.current.downloadQuality;
       fallbackAttemptRef.current = key;
       setPlaybackError(''); setWaitingFor(intent.vidIndex);
@@ -439,10 +447,10 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           const seekTo = recovery ? recovery.seekTo : sameEpisode ? currentPosition() : 0;
           resumeLocal(ep, seekTo, recovery ? recovery.autoplay : !sameEpisode || !loadedMediaRef.current?.element.paused);
         } else if (stateRef.current.waitingFor != null && !submitting && !recovery?.submitting
-          && (!ep || ep.locked || ['failed', 'stopped', 'cancelled', 'missing', 'completed'].includes(ep.status))) {
+          && (!ep || ep.locked || (ep.status === 'failed' && !ep.retryAt) || ['stopped', 'cancelled', 'missing', 'completed'].includes(ep.status))) {
           setWaitingFor(null);
-          setPlaybackError(ep?.status === 'stopped' || ep?.status === 'cancelled' ? '本集下载已停止，可在下载管理重试'
-            : ep?.status === 'completed' ? '已有本地文件无法播放，请在下载管理检查文件' : '本集下载失败或任务已移除，请在下载管理检查后重试');
+          setPlaybackError(ep?.error || (ep?.status === 'stopped' || ep?.status === 'cancelled' ? '本集下载已停止，可在下载管理重试'
+            : ep?.status === 'completed' ? '已有本地文件无法播放，请在下载管理检查文件' : '本集下载失败或任务已移除，请在下载管理检查后重试'));
         }
       }
     }, 2000);
@@ -483,7 +491,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     async (vidIndex, force = false) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (!ep || ep.locked) return;
-      const request = { requestId: crypto.randomUUID(), seriesId: String(activeSeriesId), vidIndex, version: mediaVersion.current };
+      const request = { requestId: crypto.randomUUID(), seriesId: String(activeSeriesId), vidIndex, quality: onlineQuality, version: mediaVersion.current };
       if (compatRequestRef.current?.version === request.version && compatRequestRef.current?.vidIndex === vidIndex) return;
       autoCompatAttemptRef.current = { version: request.version, force };
       pendingSeekRef.current = currentPosition();
@@ -506,6 +514,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           seriesId: activeSeriesId,
           vidIndex,
           vid: ep.vid,
+          quality: request.quality,
           filePath: onlineSourceRef.current === `${activeSeriesId}:${vidIndex}` ? null : ep.savePath || null,
           force,
         });
@@ -548,7 +557,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         showToast('转码异常: ' + e.message);
       }
     },
-    [episodes, activeSeriesId, autoCompat, reconnectOnce, showToast, currentPosition, persistPosition, recoverOnlineFailure]
+    [episodes, activeSeriesId, onlineQuality, autoCompat, reconnectOnce, showToast, currentPosition, persistPosition, recoverOnlineFailure]
   );
 
   const tryAutoCompat = useCallback((vidIndex) => {
@@ -612,9 +621,10 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         showToast('这一集暂时无法播放，请重新获取剧集后重试');
         return;
       }
+      const quality = stateRef.current.onlineQuality;
       onlineSourceRef.current = `${activeSeriesId}:${vidIndex}`;
       const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
-      const prefetched = !force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId ? prefetchRef.current : null;
+      const prefetched = !force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null;
       if (prefetched) prefetchRef.current = null;
       resetPlayback(autoplay);
       setCompatMap(prev => { const next = { ...prev }; delete next[vidIndex]; return next; });
@@ -634,6 +644,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           vid: ep.vid,
           seriesId: activeSeriesId,
           vidIndex,
+          quality,
           force,
         });
         if (onlineRequestRef.current !== request) {
@@ -703,6 +714,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     } else goToEpisode(currentIndex, currentPosition());
   };
 
+  const changeOnlineQuality = (quality) => {
+    if (!['auto', '720p', '1080p'].includes(quality) || !supportsOnlineQuality) return;
+    const seekTo = currentPosition();
+    const autoplay = loadedMediaRef.current ? !loadedMediaRef.current.element.paused : pendingAutoplayRef.current;
+    setOnlineQualityChoice(quality);
+    stateRef.current.onlineQuality = quality;
+    try { window.localStorage.setItem('hongguo:online-quality', quality); } catch { showToast('本次清晰度已切换，但未能保存'); }
+    fallbackAttemptRef.current = null;
+    reconnectAttemptRef.current = null;
+    setCompatMap({});
+    if (current && !current.locked) startOnlinePlay(currentIndex, seekTo, true, autoplay);
+  };
+
   // 找下一集（按集号顺序）
   const findNext = useCallback(
     (fromIndex) => {
@@ -727,8 +751,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (!cacheNext || !canPlay || video.paused || !media?.played || media.version !== mediaVersion.current
       || media.element !== video || (video.currentSrc && video.currentSrc !== videoSrc)) return;
     const next = findNext(currentIndex);
-    if (!next?.vid || (next.status === 'completed' && next.fileUrl) || prefetchRef.current) return;
-    const request = { requestId: crypto.randomUUID(), vid: next.vid, seriesId: activeSeriesId, vidIndex: next.vid_index };
+    if (!next?.vid || usableLocal(next, String(activeSeriesId)) || prefetchRef.current) return;
+    const request = { requestId: crypto.randomUUID(), vid: next.vid, seriesId: activeSeriesId, vidIndex: next.vid_index, quality: onlineQuality };
     prefetchRef.current = request;
     request.promise = window.electronAPI.prepareOnlinePlay({ ...request, prefetch: true })
       .catch(error => ({ success: false, error: error.message }))
@@ -746,7 +770,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     const finished = episodes.find((e) => e.vid_index === ci);
 
     // 看完自动删：先把刚看完这集的本地文件清掉，再决定下一集怎么播
-    if (autoDelete && finished && finished.status === 'completed' && sid) {
+    if (autoDelete && sid && usableLocal(finished, String(sid))) {
       window.electronAPI.deleteEpisodeFile(sid, ci).then((r) => {
         if (r && r.success && r.count > 0) {
           showToast(`第 ${ci} 集已看完，自动删除本地文件（释放 ${fmtSize(r.freed)}）`);
@@ -879,7 +903,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const selected = d.episodes.find(e => e.vid_index === wantedIndex && !e.locked) || d.episodes.find(e => !e.locked);
       setCurrentIndex(selected?.vid_index || 1);
       pendingSeekRef.current = selected?.vid_index === saved?.vid_index ? saved.currentTime || 0 : 0;
-      if ((requestedIndex || saved) && selected && (selected.status !== 'completed' || !selected.fileUrl)) {
+      if ((requestedIndex || saved || stateRef.current.onlineQuality !== 'auto') && selected && !usableLocal(selected, String(sid))) {
         pendingTargetRef.current = { seriesId: String(sid), vidIndex: selected.vid_index, seekTo: pendingSeekRef.current };
       }
     } catch (e) {
@@ -887,7 +911,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     } finally {
       if (version === selectionVersion.current) setLoading(false);
     }
-  }, [persistPosition, resetPlayback, loadDetail, showToast, onSeriesSelected]);
+  }, [persistPosition, resetPlayback, loadDetail, showToast, onSeriesSelected, usableLocal]);
 
   // 初次进入与浏览点播共用一次载入，避免两个初始化请求互相覆盖。
   useEffect(() => {
@@ -1093,7 +1117,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <h2>我的剧库</h2>
         </div>
         <div className="player-header-right" id="player-management">
-          <p className="player-download-quality-hint" id="player-download-quality-hint">新建下载任务生效；所选清晰度不可用时提示，不自动降级。已有文件不自动删除或覆盖。</p>
+          <p className="player-download-quality-hint" id="player-online-quality-hint">在线播放清晰度用于当前播放、切集及播放失败后的下载回退。指定画质只支持红果片源；其他来源由片源决定。已有低清文件会保留并改用在线片源。</p>
+          <p className="player-download-quality-hint" id="player-download-quality-hint">手动下载使用此项；在线播放选“自动”时，下载回退也使用此项。画质不可用会提示，不自动降级；已有文件保留。</p>
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
 
           <button
@@ -1133,6 +1158,16 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
             <Trash2 size={15} />
             看完自动删 {autoDelete ? '开' : '关'}
           </button>
+          <label className="player-download-quality">
+            <span>在线播放清晰度</span>
+            <select className="input-field" aria-label="在线播放清晰度" value={onlineQuality}
+              disabled={!supportsOnlineQuality} aria-describedby="player-online-quality-hint"
+              onChange={event => changeOnlineQuality(event.target.value)}>
+              <option value="auto">{supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定'}</option>
+              <option value="720p">720P</option>
+              <option value="1080p">1080P</option>
+            </select>
+          </label>
           <label className="player-download-quality">
             <span>下载清晰度</span>
             <select className="input-field" value={downloadQuality} disabled={qualityLoading}

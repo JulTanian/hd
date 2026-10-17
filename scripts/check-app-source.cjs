@@ -129,6 +129,14 @@ const checks = [
     assert.equal(choose([{ main_url: 'not a URL', backup_url: mediaUrl('backup'), video_meta: { codec_type: 'h264' } }])[0], mediaUrl('backup'));
     assert.equal(choose([{ main_url: 'file:///private', backup_url: 'https://user:pass@example.com/video' }])[0], null);
   }],
+  ['legacy parser uses actual dimensions before quality labels', async () => {
+    const { parseModelVideo } = nativeFixture();
+    const result = parseModelVideo(JSON.stringify({ video_list: [
+      { main_url: mediaUrl('low'), video_meta: { codec_type: 'h264', definition: '1080p', vwidth: 360, vheight: 640 } },
+      { main_url: mediaUrl('high'), video_meta: { codec_type: 'h264', definition: '720p', vwidth: 1920, vheight: 1080 } },
+    ] }));
+    assert.equal(result[0], mediaUrl('high'));
+  }],
   ['forced lookup bypasses settled play URL cache', async () => {
     const f = nativeFixture();
     const first = f.fetchPlayUrlSingle('11', '1'); await turn(); f.finish(0, 'old'); await first;

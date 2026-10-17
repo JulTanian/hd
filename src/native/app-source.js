@@ -254,17 +254,17 @@ async function fetchAppPlayUrl(vid, options = {}) {
         const codec = str(item.codec_type || item.video_meta?.codec_type).toLowerCase();
         const codecRank = ['h264', 'avc', 'avc1'].includes(codec) ? 0 : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(codec) ? 1 : 2;
         const quality = str(item.quality_desc || item.definition || item.height || item.vheight || item.video_meta?.definition);
-        const pixels = Number(quality.match(/\d+/)?.[0] || 0);
         const meta = item.video_meta || {};
         const [width, height] = [[item.vwidth, item.vheight], [item.width, item.height], [meta.vwidth, meta.vheight], [meta.width, meta.height]]
             .map(pair => pair.map(Number)).find(pair => pair.every(value => Number.isFinite(value) && value > 0)) || [0, 0];
+        const pixels = width && height ? Math.min(width, height) : Number(quality.match(/\d+/)?.[0] || 0);
         return { item, codec, codecRank, quality, pixels, width, height };
     }).filter(row => row.codecRank < 2 && meetsDownloadQuality(row, requestedQuality)).sort((a, b) => requestedQuality === 'auto'
         ? a.codecRank - b.codecRank || b.pixels - a.pixels
         : Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank);
     if (!rows.length) throw new Error(requestedQuality === 'auto'
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
-        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级下载`);
+        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`);
     let lastError;
     const variants = [];
     const seen = new Set();

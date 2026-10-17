@@ -444,13 +444,14 @@ function streamScore(v) {
   }
   const w = parseInt(meta.vwidth, 10) || 0;
   const h = parseInt(meta.vheight, 10) || 0;
+  if (w > 0 && h > 0) defNum = Math.min(w, h);
   const bitrate = parseInt(meta.bitrate || meta.real_bitrate, 10) || 0;
   return { defNum, pixels: w * h, bitrate };
 }
 
 /**
  * 解析单个 video_model JSON
- * 选流优先级：H.264 兼容性 > 清晰度标签 > 像素 > 码率
+ * 选流优先级：H.264 兼容性 > 短边分辨率（无尺寸时用标签） > 像素 > 码率
  */
 function parseModelVideo(vm) {
   if (typeof vm !== 'string') return [null, null, null];
