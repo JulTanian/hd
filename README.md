@@ -23,18 +23,18 @@
 
 ## 下载与安装
 
-**当前正式版：1.74**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
+**当前正式版：1.75**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
 
-| 设备 | 下载 1.74 | 安装方式 |
+| 设备 | 下载 1.75 | 安装方式 |
 |---|---|---|
-| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.74/Hongguo-1.74-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.74/Hongguo-1.74-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Windows x64 | [下载 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.74/hongguo-downloader-1.74.0-win-x64.exe) · [下载 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.74/hongguo-downloader-1.74.0-win-x64.zip) | 便携版，直接运行 EXE；ZIP 解压后运行同一程序 |
+| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/Hongguo-1.75-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
+| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/Hongguo-1.75-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
+| Windows x64 | [下载 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/hongguo-downloader-1.75.0-win-x64.exe) · [下载 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/hongguo-downloader-1.75.0-win-x64.zip) | 便携版，直接运行 EXE；ZIP 解压后运行同一程序 |
 
-[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.74 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.74) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.74/SHA256SUMS.txt)
+[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.75 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.75) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/SHA256SUMS.txt)
 
 - **更新旧版**：先退出应用，再替换程序，保留原有用户资料目录。软件只提示更新，不会自动下载或安装。
-- **Mac**：1.74 两种架构的应用与 DMG 均已完成 Developer ID 签名、Apple 公证及票据装订；无需全局关闭 Gatekeeper。公证不等于 App Store 审核或内容授权。
+- **Mac**：1.75 两种架构的应用与 DMG 均已完成 Developer ID 签名、Apple 公证及票据装订；无需全局关闭 Gatekeeper。公证不等于 App Store 审核或内容授权。
 - **Windows**：EXE 尚未签名，可能出现系统安全提示。请核对下载来源；首次启动会展开临时运行文件，设置与观看记录仍保存在用户资料目录。
 - **普通使用只需安装包**：Assets 中的 `source` 文件和 GitHub 自动生成的 Source code 是源码，不能直接运行。
 
@@ -46,6 +46,13 @@
 2. 在「发现短剧」浏览，或在「搜索与下载」输入剧名、红果分享链接或剧集 ID。
 3. 打开详情点「立即播放」，也可选择集数与清晰度加入下载队列。
 4. 下次从「我的剧库」或「观看记录」接着看；下载进度、失败重试和整剧合并在「下载管理」。
+
+## 1.75 安全与稳定性改进
+
+- 搜索加载与页面读取共用超时，卡住后可以继续搜索；慢加载也会读取已有结果。
+- 加强窗口隔离、页面跳转和应用接口来源检查；页面异常时可重新加载恢复。
+- 本地数据替换前同步落盘，减少纯播放时的重复目录扫描，下载与连载上新仍会刷新。
+- 限制单次整集缓冲读取，保留下载后播放；后续版本按整数段判断新旧。详见 [1.75 更新说明](docs/release-1.75.md)。
 
 ## 1.74 播放画质与恢复修复
 
