@@ -28,6 +28,7 @@ function load({ permission, manual = false, probe, encoder = 'libx264', exitCode
   const native = { fetchEpisodeList: async () => { metrics.permissions++; return permission ? permission() : { episodes: [{ vid: 'xifan:v', vid_index: 1, locked: false }] }; } };
   const context = vm.createContext({ require: name => name === 'electron' ? electron : name === 'child_process' ? childProcess : name === './src/native/hongguo' ? native : name === './src/store' ? {} : req(name), __dirname: path.dirname(source), process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout, console: { log() {}, error() {}, warn() {} } });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   context.resolveFfmpeg = () => '/fixture/ffmpeg';
   context.fetchDecryptedEpisode = async () => { metrics.media++; return Buffer.alloc(120000); };
   context.probeDuration = probe || (async () => 1);

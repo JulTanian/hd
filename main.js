@@ -8,7 +8,7 @@
  *   4. 下载管理：进度推送、暂停/取消、重试、删除、打开所在文件夹
  *   5. 设置：下载目录、命名规则、并发数（JSON 文件持久化）
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, session, protocol, Menu, Notification, screen } = require('electron');
+const { app, BrowserWindow, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen } = require('electron');
 const path = require('path');
 const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
 if (IS_PREVIEW) {
@@ -36,12 +36,22 @@ const { availableRelease } = require('./src/native/app-update');
 const { fetchPublicDetails } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const mediaAccess = require('./src/native/media-access').createMediaAccess(process.env.VITE_DEV_SERVER_URL);
+const rendererSecurity = require('./src/native/renderer-security').createRendererSecurity(
+  path.join(__dirname, 'dist-react', 'index.html'), process.env.VITE_DEV_SERVER_URL);
 const APP_VERSION = app.getVersion() || '1.0.0';
 
 const APP_TITLE = IS_PREVIEW ? '红果短剧预览' : '红果短剧';
 const { createStealthController } = require('./src/native/stealth-window');
 
 let mainWindow = null;
+const ipcMain = {
+  handle(channel, handler) {
+    rawIpcMain.handle(channel, async (event, ...args) => {
+      if (!rendererSecurity.isTrustedSender(event, mainWindow)) throw new Error('窗口请求无效');
+      return handler(event, ...args);
+    });
+  },
+};
 let storageError = null;
 store.setErrorHandler?.(payload => {
   storageError = payload;
@@ -85,7 +95,7 @@ protocol.registerSchemesAsPrivileged([
 
 /** vid -> { buffer, size, lastUsed, seriesId, vidIndex } */
 const onlineCache = new Map();
-const ONLINE_MAX_BYTES = 300 * 1024 * 1024; // 内存缓存上限
+const ONLINE_MAX_BYTES = 300 * 1024 * 1024; // 单集整块读取及缓存淘汰预算，不是进程总内存上限
 const onlinePreparing = new Map(); // vid -> shared preparation + abort controller
 const onlineSessions = new Map(); // opaque stream ID -> playback lifetime
 
@@ -406,6 +416,7 @@ function saveDownloadTasks() {
     return rest;
   });
   store.saveTasks(serializable);
+  sendToRenderer('download-queue-changed', {});
 }
 
 // ===== 短剧档案（播放页据此列出完整分集）=====
@@ -848,9 +859,14 @@ function getSearchWindow() {
     try { searchWindow.loadURL(sourcePageUrl(url)).catch(() => {}); } catch (_) {}
     return { action: 'deny' };
   });
-  searchWindow.on('closed', () => {
-    searchWindow = null;
-    searchWindowReady = null;
+  const win = searchWindow;
+  for (const name of ['will-navigate', 'will-redirect']) {
+    win.webContents.on(name, (event, url) => {
+      try { sourcePageUrl(url); } catch (_) { event.preventDefault(); }
+    });
+  }
+  win.on('closed', () => {
+    if (searchWindow === win) searchWindow = null;
   });
   return searchWindow;
 }
@@ -958,56 +974,82 @@ const BROWSE_META_JS = `(() => {
   return JSON.stringify(out);
 })()`;
 
-/** 页面结构与搜索页一致，分类页复用同一个嗅探 + 串行队列 */
+/** 隐藏搜索窗口串行嗅探；整个任务（含加载和读取）共用超时。 */
 async function runSniffOnUrl(url, label) {
-  const win = getSearchWindow();
-
   // 同一窗口串行执行，避免并发导航互相打断
   const task = async () => {
-    console.log(`[${label}] 打开:`, url);
-    try {
-      await win.loadURL(url, { userAgent: SEARCH_UA });
-    } catch (e) {
-      // loadURL 在页面内有重定向/中断时也可能 reject，这里继续尝试读取 DOM
-      console.warn(`[${label}] loadURL 返回异常（继续尝试读取）:`, e.message);
-    }
-
-    const deadline = Date.now() + SEARCH_TIMEOUT_MS;
-    let last = [];
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 400));
+    const win = getSearchWindow();
+    // Reserve the last part of the deadline for empty-page details.
+    const pollDeadline = Date.now() + SEARCH_TIMEOUT_MS * 0.8;
+    let expired = false;
+    const timeoutError = new Error('搜索超时，请稍后重试');
+    const assertActive = () => {
+      if (expired) throw timeoutError;
+      if (win.isDestroyed()) throw new Error('搜索窗口已关闭，请重试');
+    };
+    const evaluate = async script => {
+      assertActive();
+      const value = await win.webContents.executeJavaScript(script, true);
+      assertActive();
+      return value;
+    };
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        expired = true;
+        if (!win.isDestroyed()) win.destroy();
+        reject(timeoutError);
+      }, SEARCH_TIMEOUT_MS);
+    });
+    const sniff = async () => {
+      console.log(`[${label}] 打开:`, url);
       try {
-        const raw = await win.webContents.executeJavaScript(SNIFFER_JS, true);
-        last = JSON.parse(raw || '[]');
+        await win.loadURL(url, { userAgent: SEARCH_UA });
       } catch (e) {
-        last = [];
+        // loadURL 在页面内有重定向/中断时也可能 reject，这里继续尝试读取 DOM
+        console.warn(`[${label}] loadURL 返回异常（继续尝试读取）:`, e.message);
       }
-      if (last.length > 0) break;
-    }
+      assertActive();
 
-    let meta = { page: 1, totalPages: 0, total: 0, genres: [] };
-    try {
-      meta = JSON.parse((await win.webContents.executeJavaScript(BROWSE_META_JS, true)) || '{}');
-    } catch (_) {}
+      let last = [];
+      while (true) {
+        assertActive();
+        try {
+          const raw = await evaluate(SNIFFER_JS);
+          last = JSON.parse(raw || '[]');
+        } catch (e) {
+          assertActive();
+          last = [];
+        }
+        if (last.length > 0 || Date.now() >= pollDeadline) break;
+        await new Promise((r) => setTimeout(r, 400));
+      }
 
-    if (!last.length) {
-      // 兜底：把页面标题带回去，便于用户判断是「无结果」还是「被拦」
-      let pageTitle = '';
+      let meta = { page: 1, totalPages: 0, total: 0, genres: [] };
       try {
-        pageTitle = await win.webContents.executeJavaScript('document.title', true);
+        meta = JSON.parse((await evaluate(BROWSE_META_JS)) || '{}');
       } catch (_) {}
-      return { success: true, results: [], pageTitle, meta };
-    }
+      assertActive();
 
-    const results = last
-      .filter((r) => r.series_id && r.series_title)
-      .map((r) => ({
-        ...r,
-        url: `${SEARCH_SITE}/detail?series_id=${r.series_id}`,
-      }));
+      if (!last.length) {
+        let pageTitle = '';
+        try { pageTitle = await evaluate('document.title'); } catch (_) {}
+        assertActive();
+        return { success: true, results: [], pageTitle, meta };
+      }
 
-    console.log(`[${label}] 命中 ${results.length} 部`);
-    return { success: true, results, meta };
+      const results = last
+        .filter((r) => r.series_id && r.series_title)
+        .map((r) => ({
+          ...r,
+          url: `${SEARCH_SITE}/detail?series_id=${r.series_id}`,
+        }));
+
+      console.log(`[${label}] 命中 ${results.length} 部`);
+      return { success: true, results, meta };
+    };
+    try { return await Promise.race([sniff(), timeout]); }
+    finally { clearTimeout(timer); }
   };
 
   // 串行化
@@ -1203,7 +1245,7 @@ function rescanDownloadsFromDisk() {
       let size = 0;
       try { size = fs.statSync(f.path).size; } catch (_) {}
       downloadTasks.unshift({
-        id: 'rescanned_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+        id: 'rescanned_' + randomUUID(),
         batchId: 'rescanned',
         savePath: f.path,
         customDir: scanned.dir,
@@ -1998,6 +2040,7 @@ function registerStreamProtocol() {
       });
     } catch (error) {
       cleanup();
+      if (error.code === 'MEDIA_TOO_LARGE') sendToRenderer('online-play-progress', { requestId: session.requestId, code: error.code, error: error.message });
       return new Response('media unavailable', { status: controller.signal.aborted ? 499 : 502 });
     }
   }));
@@ -2115,19 +2158,21 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
 }
 
 /** Encrypted sources and compatibility transcoding still require the complete MP4. */
-async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity, force = false, quality = 'auto') {
+async function fetchDecryptedEpisode(vid, onProgress, seriesId, playInfo, signal, maxBytes = ONLINE_MAX_BYTES, force = false, quality = 'auto') {
   return withMediaRecovery(vid, seriesId, { playInfo, signal, force, quality }, candidate =>
     fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, candidate, signal, maxBytes));
 }
 
-async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, signal, maxBytes = Infinity) {
+async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, signal, maxBytes = ONLINE_MAX_BYTES) {
+  maxBytes = Math.min(maxBytes, ONLINE_MAX_BYTES);
+  const tooLarge = () => Object.assign(new Error('本集过大，请下载后播放'), { code: 'MEDIA_TOO_LARGE' });
   if (playInfo?.format === 'hls') throw new Error('HLS 视频必须先准备为本地媒体文件');
   if (!playInfo?.url) throw new Error(playInfo?.error || '未获取到有效播放地址');
   if (signal?.aborted) throw new Error('已取消播放');
   if (playInfo.contentKey && !/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
   const response = await requestMedia(playInfo, { signal });
   const total = Number(response.headers['content-length']) || 0;
-  if (total > maxBytes) { response.data.destroy(); throw new Error('该集过大，跳过预缓存'); }
+  if (total > maxBytes) { response.data.destroy(); throw tooLarge(); }
   const chunks = [];
   let received = 0, lastProgress = 0;
   if (playInfo.contentKey) {
@@ -2137,7 +2182,7 @@ async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, si
       const input = path.join(temporary, 'encrypted.mp4'), output = path.join(temporary, 'decoded.mp4');
       response.data.on('data', chunk => {
         received += chunk.length;
-        if (received > maxBytes) { response.data.destroy(new Error('该集过大，跳过预缓存')); return; }
+        if (received > maxBytes) { response.data.destroy(tooLarge()); return; }
         if (onProgress && (Date.now() - lastProgress >= 150 || received === total)) {
           onProgress(received, total); lastProgress = Date.now();
         }
@@ -2146,6 +2191,7 @@ async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, si
       if (!received || (total && received !== total)) throw mediaTransferError('视频下载不完整，请重试');
       if (onProgress) onProgress(received, received, 'decrypting');
       await decryptContentKeyFile(input, output, playInfo.contentKey, { signal });
+      if ((await fsp.stat(output)).size > maxBytes) throw tooLarge();
       return await fsp.readFile(output);
     } finally {
       response.data.destroy();
@@ -2154,7 +2200,7 @@ async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, si
   }
   for await (const chunk of response.data) {
     received += chunk.length;
-    if (received > maxBytes) { response.data.destroy(); throw new Error('该集过大，跳过预缓存'); }
+    if (received > maxBytes) { response.data.destroy(); throw tooLarge(); }
     chunks.push(chunk);
     if (onProgress && (Date.now() - lastProgress >= 150 || received === total)) {
       onProgress(received, total); lastProgress = Date.now();
@@ -2215,7 +2261,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
-              entry.buffer = await fetchDecryptedEpisodeOnce(sourceVid,progress,seriesId,playInfo,controller.signal,prefetch?ONLINE_MAX_BYTES:Infinity);
+              entry.buffer = await fetchDecryptedEpisodeOnce(sourceVid,progress,seriesId,playInfo,controller.signal);
               entry.size = entry.buffer.length;
             }
             if (controller.signal.aborted) throw new Error('已取消播放');
@@ -2239,7 +2285,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
       cached, streaming: !!entry.playInfo };
   } catch (error) {
     releaseOnlineSession(streamId);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, code: error.code };
   }
 });
 
@@ -2487,7 +2533,7 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
           }
         });
         else {
-          const buf = cached?.buffer || await fetchDecryptedEpisode(String(vid), () => {}, seriesId, playInfo, signal, Infinity, !!force, quality);
+          const buf = cached?.buffer || await fetchDecryptedEpisode(String(vid), () => {}, seriesId, playInfo, signal, ONLINE_MAX_BYTES, !!force, quality);
           checkCancelled(); fs.writeFileSync(tmpInput,buf);
         }
         inputPath = tmpInput;
@@ -2590,7 +2636,7 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
   } catch (error) {
     if (signal.aborted) return compatCancelled();
     console.error('[Compat] 转码失败:', error.message);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, code: error.code };
   } finally {
     signal.removeEventListener('abort', abortPreparation);
     if (diskInput) { diskInput.disk.readers--; disposeOnlineDisk(diskInput); }
@@ -2669,7 +2715,7 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
   const downloadDir = seriesDownloadDir(root, seriesId, cleanSeriesTitle);
   try { fs.mkdirSync(downloadDir, { recursive: true }); } catch (_) {}
 
-  const batchId = 'hongguobatch_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  const batchId = 'hongguobatch_' + randomUUID();
   const firstCover = cover || (episodes[0] && episodes[0].cover) || '';
 
   const batchInfo = {
@@ -2713,7 +2759,7 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
     }
 
     const task = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      id: randomUUID(),
       batchId,
       batchInfo,
       savePath: finalPath,
@@ -3493,7 +3539,11 @@ ipcMain.handle('get-app-info', async () => ({
 ipcMain.handle('open-external-url', async (event, url) => {
   if (!url) return { success: false, error: '缺少链接' };
   try {
-    await shell.openExternal(url);
+    const target = new URL(url);
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+      return { success: false, error: '仅支持打开网页链接' };
+    }
+    await shell.openExternal(target.href);
     return { success: true };
   } catch (err) {
     console.error('[Shell] 打开链接失败:', err.message);
@@ -3569,11 +3619,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
   mainWindow.setMenuBarVisibility(false);
+  rendererSecurity.protectWindow(mainWindow);
   episodePanel.attach(mainWindow);
   mainWindow.webContents.once('did-finish-load', () => {
     if (storageError) sendToRenderer('storage-error', storageError);

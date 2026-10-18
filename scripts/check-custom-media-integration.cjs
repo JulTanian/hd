@@ -10,6 +10,7 @@ const custom={validateSource:d=>({...d}),assertEnabled:()=>{if(!settings.custom_
 const native={fetchPlayUrlSingle:async()=>{custom.assertEnabled();return{url:'https://fixture.example/media.m3u8',source:'custom',format:'hls',vid};}};
 const context=vm.createContext({require:n=>n==='electron'?{app,ipcMain:{handle:(n,f)=>handlers[n]=f},protocol:{registerSchemesAsPrivileged(){},handle:(n,f)=>protocols[n]=f}}:n==='./src/store'?{getSettings:()=>settings,saveTasks(){},saveSettings:next=>{if(failSave)throw new Error('disk full');Object.assign(settings,next);}}:n==='./src/native/custom-source'?custom:n==='./src/native/hongguo'?native:n==='./src/native/hls-media'?{remuxHls:async({url,output,checkAccess,onProgress})=>{checkAccess();if(url.includes('/bad'))throw new Error('bad HLS candidate');remuxes++;onProgress?.(200000);fs.writeFileSync(output,Buffer.alloc(200000,7));}}:req(n),__dirname:path.dirname(source),process,Buffer,URL,Response,Request,Headers,AbortController,setTimeout,clearTimeout,console:{log(){},warn(){},error(){}}});
 vm.runInContext(fs.readFileSync(source,'utf8'),context);const run=s=>vm.runInContext(s,context); const realRequestMedia=context.requestMedia;
+require('./fixtures/trusted-ipc.cjs')(context, handlers);
 (async()=>{
   assert.equal(typeof handlers['get-custom-sources'],'function','custom source IPC must exist');
   assert.equal((await handlers['get-media-sources']()).sources.at(-1).id,`custom:${id}`);

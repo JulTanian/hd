@@ -36,6 +36,7 @@ function load(url, mode = 'ok', key = contentKey) {
   } };
   const context = vm.createContext({ require: n => n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === 'child_process' || n === 'node:child_process' ? childProcess : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root: dir }) } : req(n), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   // These transport/decryption fixtures are synthetic; real media validity is checked separately.
   context.probeVideoInfo = async () => ({ w: 1080, h: 1920, duration: 12, codec: 'h264' });
   context.resolveFfmpeg = () => '/fixture/ffprobe';

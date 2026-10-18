@@ -35,6 +35,7 @@ const context = vm.createContext({ require: name => name === 'electron' ? electr
   __dirname: path.dirname(file), process, Buffer, URL, Response, Request, Headers, AbortController,
   setTimeout, clearTimeout, console: { log() {}, warn() {}, error() {} } });
 vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
+require('./fixtures/trusted-ipc.cjs')(context, handlers);
 context.sendToRenderer = (name, payload) => events.push({ name, payload: clone(payload) });
 context.runSearchSniff = keyword => search(keyword);
 const ipc = (name, ...args) => handlers[name]({}, ...args);

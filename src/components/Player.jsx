@@ -94,7 +94,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const pendingAutoplayRef = useRef(true);
   const lastSavedRef = useRef(0);
   const stateRef = useRef({ currentIndex, autoNext, activeSeriesId });
-  stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor, downloadQuality, onlineQuality, qualityLoading };
+  stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor, downloadQuality, onlineQuality, qualityLoading, detail };
   const selectedSeriesRef = useRef('');
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
@@ -412,7 +412,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (!window.electronAPI.onOnlinePlayProgress) return undefined;
     return window.electronAPI.onOnlinePlayProgress((d) => {
       const request = onlineRequestRef.current;
-      if (!request || request.prepared || d.requestId !== request.requestId) return;
+      if (!request || d.requestId !== request.requestId) return;
+      if (d.code === 'MEDIA_TOO_LARGE') { showToast(d.error); return; }
+      if (request.prepared) return;
       setOnlineProgress({
         vid: d.vid,
         percent: d.percent || 0,
@@ -426,14 +428,20 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   // 轮询：让「正在下载」的集实时更新，并在等待时自动接上
   useEffect(() => {
     if (!activeSeriesId || (!active && waitingFor == null)) return;
-    let busy = false;
+    let busy = false, dirty = true;
+    const unsubscribe = ['onDownloadTaskAdded', 'onDownloadCompleted', 'onDownloadFailed', 'onDownloadStopped', 'onDownloadQueueChanged', 'onWatchHistoryUpdated']
+      .map(name => window.electronAPI[name]?.(() => { dirty = true; }));
     const timer = setInterval(async () => {
       if (busy) return;
+      const pending = stateRef.current.detail?.episodes.some(ep => ['pending', 'downloading'].includes(ep.status) || ep.retryAt);
+      if (!dirty && !pending && stateRef.current.waitingFor == null && !fallbackRef.current) return;
+      dirty = false;
       busy = true;
       const version = mediaVersion.current;
       const submitting = fallbackRef.current?.submitting;
       let d;
       try { d = await loadDetail(activeSeriesId); } catch (_) {} finally { busy = false; }
+      if (!d) dirty = true;
       if (!d || version !== mediaVersion.current) return;
       const intent = fallbackRef.current;
       const recovery = intent && isCurrentFallback(intent) ? intent : null;
@@ -454,7 +462,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         }
       }
     }, 2000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); unsubscribe.forEach(off => off?.()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, activeSeriesId, waitingFor, loadDetail, currentPosition, isCurrentFallback, usableLocal, resumeLocal]);
 
@@ -533,6 +541,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           });
         } else {
           setCompatProgress(null);
+          if (res?.code === 'MEDIA_TOO_LARGE') showToast(res.error);
           if (autoCompat && !res?.cancelled && reconnectOnce()) return;
           const message = (res && res.error) || '转码失败';
           if (!res?.cancelled && onlineSourceRef.current === `${activeSeriesId}:${vidIndex}`) {
@@ -652,6 +661,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           return;
         }
         if (!res || !res.success) {
+          if (res?.code === 'MEDIA_TOO_LARGE') showToast(res.error);
           await recoverOnlineFailure(ep, (res && res.error) || '在线播放准备失败');
           return;
         }

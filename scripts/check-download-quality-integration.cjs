@@ -26,6 +26,7 @@ function fixture({ width = 1080, height = 1920, quality = 'auto' } = {}) {
     process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout,
     testReadStream: () => Readable.from([Buffer.alloc(200000)]), testDimensions: { w: width, h: height, duration: 12, codec: "h264" } });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   const run = text => vm.runInContext(text, context);
   run(`pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
     probeVideoInfo = async () => testDimensions;

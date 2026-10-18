@@ -43,6 +43,7 @@ function fixture(initialTasks) {
     process, Buffer, URL, Response, Request, Headers, AbortController, setInterval: () => ({ unref() {} }), setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
     testReadStream: () => Readable.from([Buffer.alloc(200000)]) });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   const run = text => vm.runInContext(text, context);
   run(`const originalPumpQueue = pumpQueue, originalRequestMedia = requestMedia; pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
     probeVideoInfo = async () => ({ w: 1080, h: 1920, duration: 12, codec: 'h264' });

@@ -26,6 +26,7 @@ async function checkMerge(label, source, media, compatible, mode = '') {
   const context = vm.createContext({ require: name => name === 'electron' ? electron : name === './src/store' ? store : req(name), __dirname: project, process,
     console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   context.resolveFfmpeg = bin;
   context.pickH264Encoder = async () => mode === 'fallback' ? 'unavailable_test_encoder' : process.env.MERGE_ENCODER || 'h264_videotoolbox';
   context.collectSeriesEpisodeFiles = () => ({ dir: root, ordered: media.map((file, i) => ({ path: file, vid_index: i + 1 })) });

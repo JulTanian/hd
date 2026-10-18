@@ -58,7 +58,13 @@ function flush() {
   try {
     fs.mkdirSync(path.dirname(dataFile), { recursive: true });
     const serialized = JSON.stringify(cache || {}, null, 2);
-    fs.writeFileSync(temporary, serialized, { encoding: 'utf8', mode: 0o600 });
+    const fd = fs.openSync(temporary, 'w', 0o600);
+    try {
+      fs.writeFileSync(fd, serialized, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(temporary, dataFile);
     durable = serialized;
   } catch (e) {

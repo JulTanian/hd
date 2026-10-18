@@ -96,12 +96,19 @@ test('missing file initializes normally; successful saves retain unrelated and f
   assert.deepEqual(fs.readdirSync(dir), ['data.json']);
 }));
 
-test('interrupted write or rename keeps disk and memory at their last durable state', () => withStore(({ dir, file, errors }) => {
+test('interrupted write, fsync or rename keeps disk and memory at their last durable state without leaking handles', () => withStore(({ dir, file, errors }) => {
   store.init(file);
   store.saveSettings({ theme: 'light' });
   store.saveTasks([{ id: 'saved' }]);
   const before = fs.readFileSync(file, 'utf8');
-  for (const operation of ['writeFileSync', 'renameSync']) {
+  for (const operation of ['writeFileSync', 'fsyncSync', 'renameSync']) {
+    const open = fs.openSync;
+    const handles = [];
+    fs.openSync = (target, ...args) => {
+      const fd = open(target, ...args);
+      if (target === file + '.tmp') handles.push(fd);
+      return fd;
+    };
     const original = fs[operation];
     fs[operation] = (target, ...args) => {
       if (operation === 'writeFileSync') original(target, '{');
@@ -110,12 +117,36 @@ test('interrupted write or rename keeps disk and memory at their last durable st
     try {
       store.getTasks()[0].id = 'unsaved';
       assert.throws(() => store.saveTasks(store.getTasks()), /simulated disk full/);
-    } finally { fs[operation] = original; }
+    } finally { fs[operation] = original; fs.openSync = open; }
+    for (const fd of handles) assert.throws(() => fs.fstatSync(fd), { code: 'EBADF' });
     assert.equal(fs.readFileSync(file, 'utf8'), before);
     assert.equal(store.getTasks()[0].id, 'saved');
     assert.deepEqual(fs.readdirSync(dir), ['data.json']);
   }
-  assert.equal(errors.length, 2);
+  assert.equal(errors.length, 3);
   store.saveTasks([{ id: 'complete' }]);
+  assert.equal(JSON.parse(fs.readFileSync(file)).tasks[0].id, 'complete');
+}));
+
+test('temporary contents are synced and the handle is closed before replacing saved data', () => withStore(({ file }) => {
+  store.init(file);
+  store.saveTasks([{ id: 'saved' }]);
+  const before = fs.readFileSync(file, 'utf8');
+  const sync = fs.fsyncSync;
+  const rename = fs.renameSync;
+  let syncedFd;
+  fs.fsyncSync = fd => {
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+    assert.equal(JSON.parse(fs.readFileSync(file + '.tmp')).tasks[0].id, 'complete');
+    sync(fd);
+    syncedFd = fd;
+  };
+  fs.renameSync = (source, destination) => {
+    assert.notEqual(syncedFd, undefined, 'sync completed contents before replacing the saved file');
+    assert.throws(() => fs.fstatSync(syncedFd), { code: 'EBADF' });
+    return rename(source, destination);
+  };
+  try { store.saveTasks([{ id: 'complete' }]); }
+  finally { fs.fsyncSync = sync; fs.renameSync = rename; }
   assert.equal(JSON.parse(fs.readFileSync(file)).tasks[0].id, 'complete');
 }));

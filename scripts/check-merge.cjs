@@ -19,6 +19,7 @@ async function merge(label, files, compatible, mode = '') {
   const electron = { app, ipcMain: { handle: (n, fn) => handlers[n] = fn }, protocol: { registerSchemesAsPrivileged() {} } };
   const context = vm.createContext({ require: name => name === 'electron' ? electron : name === './src/store' ? { getSettings: () => ({}), saveMergeTasks() {} } : req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context);
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   context.resolveFfmpeg = bin;
   context.pickH264Encoder = async () => mode === 'fallback' ? 'unavailable_test_encoder' : process.env.MERGE_ENCODER || 'libx264';
   context.collectSeriesEpisodeFiles = () => ({ dir: root, ordered: files.map((file, i) => ({ path: file, vid_index: i + 1 })) });

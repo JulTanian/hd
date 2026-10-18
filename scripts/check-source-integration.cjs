@@ -10,6 +10,7 @@ const hema={search:async()=>({success:true,results:[{series_id:'hema:1'}]})};
 const electron={app,ipcMain:{handle:(name,fn)=>handlers[name]=fn},protocol:{registerSchemesAsPrivileged(){}}};
 const context=vm.createContext({require:n=>n==='electron'?electron:n==='./src/native/hongguo'?native:n==='./src/native/hema'?hema:n==='./src/store'?{getSettings:()=>({root}),saveTasks(){},saveSeries(){}}:req(n),__dirname:path.dirname(file),process,Buffer,URL,Response,Request,Headers,AbortController,setTimeout,clearTimeout,console:{log(){},warn(){},error(){}}});
 vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+require('./fixtures/trusted-ipc.cjs')(context, handlers);
 context.sendToRenderer=()=>{};context.pumpQueue=()=>{};
 let failures=0;async function check(name,fn){if(process.argv[2]&&!name.includes(process.argv[2]))return;try{await fn();console.log('PASS '+name);}catch(e){failures++;console.error('FAIL '+name+': '+e.message);}}
 (async()=>{

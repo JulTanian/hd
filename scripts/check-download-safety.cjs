@@ -17,6 +17,7 @@ function load(settings = {}, overrides = {}) {
   const store = { getSettings: () => ({ root: dir, ...settings }), saveTasks() {}, saveSeries() {}, saveSettings() {} };
   const context = vm.createContext({ require: name => overrides[name] || (name === 'electron' ? electron : name === './src/store' ? store : req(name)), __dirname: path.dirname(source), process: { ...process, env: { ...process.env } }, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
+  require('./fixtures/trusted-ipc.cjs')(context, handlers);
   const pump = context.pumpQueue;
   context.pumpQueue = () => {}; // Inspect queued destinations without fetching media.
   return { context, handlers, dir, pump, run: code => vm.runInContext(code, context), set(name, value) { context.fixture = value; vm.runInContext(`${name} = fixture`, context); } };

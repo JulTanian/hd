@@ -15,9 +15,10 @@ const axios = { get: async (url, options) => { requests++; requestOptions = { ur
 const context = vm.createContext({ require: name => name === 'electron' ? electron : name === 'axios' ? axios : name === './src/store' ? store : req(name), __dirname: path.dirname(file), process, Buffer, URL, AbortController, setTimeout, clearTimeout, console: { log() {}, warn() {}, error() {} } });
 vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
 vm.runInContext('mainWindow = { webContents: testSender };', Object.assign(context, { testSender: sender }));
+require('./fixtures/trusted-ipc.cjs')(context, handlers);
 context.sendToRenderer = (name, value) => events.push([name,value]);
 context.applyProxySettings = async () => {};
-const ipc = (name, ...args) => handlers[name]({sender}, ...args);
+const ipc = (name, ...args) => handlers[name]({}, ...args);
 (async()=>{
   assert.equal(typeof handlers['check-app-update'], 'function', 'update detection IPC must exist');
   assert.equal((await ipc('get-settings')).app_updates_enabled, true);
