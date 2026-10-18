@@ -14,7 +14,7 @@ const profile = path.join(temp, 'profile');
 fs.mkdirSync(out, { recursive: true });
 fs.mkdirSync(profile);
 const result = { version: pkg.version, hostPlatform: process.platform, hostArch: process.arch, signed: false, checks: [] };
-let child, socket, seq = 0;
+let child, socket, mainSocket, seq = 0;
 const pending = new Map();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function pe64(file) {
@@ -24,18 +24,80 @@ function pe64(file) {
   assert.equal(data.readUInt32LE(pe), 0x4550);
   assert.equal(data.readUInt16LE(pe + 4), 0x8664, path.basename(file));
 }
-function cdp(method, params = {}) {
+function cdp(method, params = {}, connection = socket) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timeout: ' + method)); }, 20000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
-    socket.send(JSON.stringify({ id, method, params }));
+    connection.send(JSON.stringify({ id, method, params }));
   });
 }
-async function evaluate(expression) {
-  const reply = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+async function evaluate(expression, connection = socket) {
+  const reply = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, connection);
   assert(!reply.exceptionDetails, JSON.stringify(reply.exceptionDetails));
   return reply.result.value;
+}
+async function connectSocket(url) {
+  const connection = new WebSocket(url);
+  connection.addEventListener('message', event => {
+    const message = JSON.parse(event.data);
+    if (!message.id) return;
+    const call = pending.get(message.id); pending.delete(message.id);
+    if (call) message.error ? call.reject(new Error(JSON.stringify(message.error))) : call.resolve(message.result);
+  });
+  await new Promise((resolve, reject) => { connection.addEventListener('open', resolve, { once: true }); connection.addEventListener('error', reject, { once: true }); });
+  return connection;
+}
+async function installRendererSecurityDiagnostics() {
+  try {
+    let target;
+    for (let i = 0; i < 50; i++) {
+      try { target = (await (await fetch('http://127.0.0.1:9440/json')).json()).find(t => t.webSocketDebuggerUrl); } catch {}
+      if (target) break;
+      await delay(100);
+    }
+    assert(target, 'Main-process inspector unavailable');
+    mainSocket = await connectSocket(target.webSocketDebuggerUrl);
+    result.rendererSecurity = await evaluate(`(() => {
+      const req = typeof require === 'function' ? require : process.getBuiltinModule('module').createRequire(process.resourcesPath + '/app.asar/main.js');
+      const { app, BrowserWindow, ipcMain } = req('electron');
+      const path = req('node:path');
+      const mainFile = req.resolve(path.join(app.getAppPath(), 'main.js'));
+      const entryFile = path.join(path.dirname(mainFile), 'dist-react/index.html');
+      const security = req(path.join(path.dirname(mainFile), 'src/native/renderer-security')).createRendererSecurity(entryFile, process.env.VITE_DEV_SERVER_URL);
+      const win = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('file:'));
+      if (!win) throw new Error('No application window for IPC diagnostics');
+      const diagnostic = globalThis.__hongguoRendererSecurityDiagnostic = {
+        appPath: app.getAppPath(),
+        mainFile,
+        entryFile,
+        pageURL: win.webContents.getURL(),
+        entryExpected: req('node:url').pathToFileURL(entryFile).href,
+        mainFrameURL: win.webContents.mainFrame.url,
+        isTrustedUrl: security.isTrustedUrl(win.webContents.getURL()),
+      };
+      const original = ipcMain._invokeHandlers?.get('get-app-info');
+      if (typeof original !== 'function') { diagnostic.hookError = 'IPC handler map unavailable'; return diagnostic; }
+      // This CI-only wrapper records the real event, then restores and calls the unchanged handler.
+      ipcMain.removeHandler('get-app-info');
+      ipcMain.handle('get-app-info', (event, ...args) => {
+        ipcMain.removeHandler('get-app-info');
+        ipcMain.handle('get-app-info', original);
+        diagnostic.event = {
+          senderMatches: event.sender === win.webContents,
+          frameMatches: event.senderFrame === win.webContents.mainFrame,
+          senderFrameURL: event.senderFrame?.url,
+          normalizedFrameURL: event.senderFrame?.url ? new URL(event.senderFrame.url).href : null,
+          senderFrameId: event.senderFrame ? [event.senderFrame.processId, event.senderFrame.routingId] : null,
+          mainFrameId: [win.webContents.mainFrame.processId, win.webContents.mainFrame.routingId],
+          frameUrlTrusted: security.isTrustedUrl(event.senderFrame?.url),
+          isTrustedSender: security.isTrustedSender(event, win),
+        };
+        return original(event, ...args);
+      });
+      return diagnostic;
+    })()`, mainSocket);
+  } catch (error) { result.rendererSecurity = { diagnosticError: error.message }; }
 }
 async function clickControl(label) {
   const point = await evaluate(`(async () => {
@@ -122,7 +184,7 @@ async function keyHandoff(key, code, expectedSource) {
   fs.copyFileSync(sample, secondSample);
   const fixtureEpisodes = [sample, secondSample].map((savePath, index) => ({ id: `fixture-${index + 1}`, status: 'completed', savePath, hongguoInfo: { series_id: sid, series_title: 'Windows verification', vid: `fixture-${index + 1}`, vid_index: index + 1 } }));
   fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({ settings: { root: mediaDir, watch_updates_enabled: false, watch_sequels_enabled: false }, tasks: fixtureEpisodes, series: [{ series_id: sid, series_title: 'Windows verification', episodes: fixtureEpisodes.map(task => ({ ...task.hongguoInfo, title: 'CC0 flower footage' })) }] }));
-  child = spawn(portable, ['--user-data-dir=' + profile, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9439', '--autoplay-policy=no-user-gesture-required'], { stdio: 'ignore' });
+  child = spawn(portable, ['--user-data-dir=' + profile, '--inspect=127.0.0.1:9440', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9439', '--autoplay-policy=no-user-gesture-required'], { stdio: 'ignore' });
   let target;
   for (let i = 0; i < 150; i++) {
     try { target = (await (await fetch('http://127.0.0.1:9439/json')).json()).find(t => t.type === 'page' && t.url.startsWith('file:')); } catch {}
@@ -130,19 +192,21 @@ async function keyHandoff(key, code, expectedSource) {
     await delay(200);
   }
   assert(target, 'Packaged application did not open its renderer');
-  socket = new WebSocket(target.webSocketDebuggerUrl);
-  socket.addEventListener('message', event => {
-    const message = JSON.parse(event.data);
-    if (!message.id) return;
-    const call = pending.get(message.id); pending.delete(message.id);
-    if (call) message.error ? call.reject(new Error(JSON.stringify(message.error))) : call.resolve(message.result);
-  });
-  await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
+  socket = await connectSocket(target.webSocketDebuggerUrl);
   for (let i = 0; i < 50; i++) {
     if (await evaluate('Boolean(window.electronAPI && document.querySelector("#root")?.children.length)')) break;
     await delay(100);
   }
-  const info = await evaluate('window.electronAPI.getAppInfo()');
+  await installRendererSecurityDiagnostics();
+  let info;
+  try { info = await evaluate('window.electronAPI.getAppInfo()'); }
+  finally {
+    if (mainSocket) {
+      try { result.rendererSecurity = await evaluate('globalThis.__hongguoRendererSecurityDiagnostic', mainSocket) || result.rendererSecurity; }
+      catch (error) { result.rendererSecurity.readError = error.message; }
+    }
+    fs.writeFileSync(path.join(out, 'renderer-security.json'), JSON.stringify(result.rendererSecurity, null, 2) + '\n');
+  }
   assert.equal(info.version, pkg.version); assert.equal(info.platform, 'win32');
   const settings = await evaluate('window.electronAPI.getSettings()');
   assert.equal(settings.root, mediaDir, 'Temporary profile must isolate all user state');
@@ -312,6 +376,7 @@ async function keyHandoff(key, code, expectedSource) {
 })().catch(error => { result.passed = false; result.error = error.stack; console.error(error.stack); process.exitCode = 1; })
   .finally(() => {
     socket?.close();
+    mainSocket?.close();
     if (child?.pid) { try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {} }
     fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2) + '\n');
   });
