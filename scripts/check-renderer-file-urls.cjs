@@ -23,10 +23,10 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/native/renderer-
     fileURLToPath: value => url.fileURLToPath(value, { windows: true }),
   } : require(name),
 });
-const windows = moduleFixture.exports.createRendererSecurity('c:\\Users\\RUNNER~1\\app.asar\\dist-react\\index.html');
-assert.equal(windows.isTrustedUrl('file:///C:/Users/RUNNER~1/app.asar/dist-react/index.html'), true);
-assert.equal(windows.isTrustedUrl('file:///C:/Users/RUNNER%7E1/app.asar/dist-react/index.html'), true);
-assert.equal(windows.isTrustedUrl('file:///D:/Users/RUNNER~1/app.asar/dist-react/index.html'), false);
-assert.equal(windows.isTrustedUrl('file:///C:/Users/other/app.asar/dist-react/index.html'), false);
-assert.equal(windows.isTrustedUrl('file:///C:/Users/RUNNER~1/app.asar/dist-react/index.html?other=1'), false);
+const windows = moduleFixture.exports.createRendererSecurity('c:\\Fixtures\\APP~1\\app.asar\\dist-react\\index.html');
+assert.equal(windows.isTrustedUrl('file:///C:/Fixtures/APP~1/app.asar/dist-react/index.html'), true);
+assert.equal(windows.isTrustedUrl('file:///C:/Fixtures/APP%7E1/app.asar/dist-react/index.html'), true);
+assert.equal(windows.isTrustedUrl('file:///D:/Fixtures/APP~1/app.asar/dist-react/index.html'), false);
+assert.equal(windows.isTrustedUrl('file:///C:/Fixtures/other/app.asar/dist-react/index.html'), false);
+assert.equal(windows.isTrustedUrl('file:///C:/Fixtures/APP~1/app.asar/dist-react/index.html?other=1'), false);
 console.log('PASS equivalent file URL encodings and Windows drives; other files, queries and encoded separators remain denied');
