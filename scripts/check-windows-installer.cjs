@@ -16,6 +16,7 @@ function checkConfig() {
   assert.equal(pkg.build.nsis.artifactName.replace('${version}', pkg.version).replace('${ext}', 'exe'), setupName);
   assert.equal(pkg.build.portable.artifactName, '${productName}-${version}-便携版.${ext}');
   assert(pkg.build.mac.target.some(target => target.target === 'zip' && target.arch.includes('arm64') && target.arch.includes('x64')));
+  assert(pkg.build.mac.extraResources.some(resource => resource.from === 'build/app-update.yml' && resource.to === 'app-update.yml'), 'Mac directory builds must carry updater configuration');
   assert.notEqual(pkg.build.win.verifyUpdateCodeSignature, false);
 }
 
