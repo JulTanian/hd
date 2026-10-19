@@ -27,7 +27,7 @@ function pe64(file) {
 function cdp(method, params = {}) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timeout: ' + method)); }, 20000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timeout: ' + method + (result.stage ? ' [' + result.stage + ']' : ''))); }, 20000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
     socket.send(JSON.stringify({ id, method, params }));
   });
@@ -201,17 +201,33 @@ async function keyHandoff(key, code, expectedSource) {
   })()`);
   assert.deepEqual(rangeRead, { status: 206, length: 32 }, 'Packaged renderer must read media Range through CORS using the IPC-issued URL');
   result.mediaCapability = { opaque: true, rendererRangeRead: rangeRead };
-  assert.equal((await evaluate(`window.electronAPI.playSeries({seriesId:${JSON.stringify(sid)}, vidIndex:1})`)).success, true);
+  result.stage = 'play-series-request';
+  result.playSeries = await evaluate(`window.electronAPI.playSeries({seriesId:${JSON.stringify(sid)}, vidIndex:1})`);
+  assert.equal(result.playSeries.success, true);
+  result.stage = 'playback-readiness-and-progress';
   const played = await evaluate(`(async () => {
-    let v;
-    for (let i=0; i<100; i++) { v=document.querySelector('video'); if(v?.readyState>=2) break; await new Promise(r=>setTimeout(r,100)); }
-    if(!v || v.readyState<2) throw new Error('Player did not load local episode'); v.muted=true;
-    if(v.paused) document.querySelector('[aria-label="播放"]').click();
-    await new Promise(r => setTimeout(r, 1200));
-    return { time: v.currentTime, width: v.videoWidth, height: v.videoHeight, error: v.error?.message };
+    const deadline = performance.now() + 12000;
+    let playRequested = false;
+    while (performance.now() < deadline) {
+      const v = document.querySelector('video');
+      window.__windowsPlaybackProbe = { present: !!v, time: v?.currentTime, width: v?.videoWidth, height: v?.videoHeight,
+        readyState: v?.readyState, networkState: v?.networkState, paused: v?.paused, error: v?.error?.message,
+        visibility: document.visibilityState, remainingMs: Math.max(0, deadline - performance.now()) };
+      if (v?.readyState >= 2) {
+        v.muted = true;
+        if (v.paused && !playRequested) {
+          const button = document.querySelector('[aria-label="播放"]');
+          if (button) { button.click(); playRequested = true; }
+        }
+        if (v.currentTime > 0.5) return { time: v.currentTime, width: v.videoWidth, height: v.videoHeight, error: v.error?.message };
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    throw new Error('Player did not advance past 0.5s within 12s: ' + JSON.stringify(window.__windowsPlaybackProbe));
   })()`);
   assert(played.time > 0.5 && played.width === 640 && played.height === 360, JSON.stringify(played));
   result.playback = played;
+  delete result.stage;
   const canvasRead = await evaluate(`(() => {
     const video = document.querySelector('video');
     const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2;
