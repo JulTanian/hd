@@ -23,20 +23,22 @@
 
 ## 下载与安装
 
-**当前正式版：1.75**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
+**当前正式版：1.80**。按你的设备选择一个文件即可，媒体工具已内置，无需另装 Node.js、Homebrew 或 FFmpeg。
 
-| 设备 | 下载 1.75 | 安装方式 |
+| 设备 | 下载 1.80 | 安装方式 |
 |---|---|---|
-| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/Hongguo-1.75-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/Hongguo-1.75-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动 |
-| Windows x64 | [下载 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/hongguo-downloader-1.75.0-win-x64.exe) · [下载 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/hongguo-downloader-1.75.0-win-x64.zip) | 便携版，直接运行 EXE；ZIP 解压后运行同一程序 |
+| Apple 芯片 Mac（M 系列），macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/Hongguo-1.80-mac-arm64.dmg) | 打开 DMG，拖入「应用程序」后启动；后续支持应用内更新 |
+| Intel Mac，macOS 13+ | [下载 DMG](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/Hongguo-1.80-mac-x64.dmg) | 打开 DMG，拖入「应用程序」后启动；后续支持应用内更新 |
+| Windows x64（推荐安装版） | [下载安装版 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/hongguo-downloader-1.80.0-win-x64-setup.exe) | 按向导安装，后续支持应用内更新 |
+| Windows x64（便携版） | [下载便携 EXE](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/hongguo-downloader-1.80.0-win-x64.exe) · [下载便携 ZIP](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/hongguo-downloader-1.80.0-win-x64.zip) | 直接运行 EXE；ZIP 解压后运行同一程序，后续仍需手动替换 |
 
-[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.75 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.75) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.75/SHA256SUMS.txt)
+[查看最新正式版](https://github.com/jackotom/hongguo-drama/releases/latest) · [1.80 更新说明与源码](https://github.com/jackotom/hongguo-drama/releases/tag/v1.80) · [SHA256 校验文件](https://github.com/jackotom/hongguo-drama/releases/download/v1.80/SHA256SUMS.txt)
 
-- **更新旧版**：先退出应用，再替换程序，保留原有用户资料目录。软件只提示更新，不会自动下载或安装。
-- **Mac**：1.75 两种架构的应用与 DMG 均已完成 Developer ID 签名、Apple 公证及票据装订；无需全局关闭 Gatekeeper。公证不等于 App Store 审核或内容授权。
-- **Windows**：EXE 尚未签名，可能出现系统安全提示。请核对下载来源；首次启动会展开临时运行文件，设置与观看记录仍保存在用户资料目录。
-- **普通使用只需安装包**：Assets 中的 `source` 文件和 GitHub 自动生成的 Source code 是源码，不能直接运行。
+- **首次升级到 1.80**：1.75 及更早版本仍需手动下载一次；退出旧应用后替换 Mac 程序，或运行 Windows 安装包。原有用户资料位置不变，请保留资料目录和下载文件。
+- **后续更新**：Mac 与 Windows 安装版可在应用内下载新版，下载完成后由你点击重启安装，不强制升级。Windows 便携版继续通过发行页下载并手动替换。
+- **Mac**：正式包的 Developer ID 签名、Apple 公证和票据装订状态见本版发行页。无需全局关闭 Gatekeeper；公证不等于 App Store 审核或内容授权。
+- **Windows**：安装版和便携版 EXE 尚未签名，可能出现系统安全提示。请核对官方下载来源；便携版首次启动会展开临时运行文件，两种版本沿用原用户资料目录。
+- **普通使用只需上表安装文件**：Assets 中的 Mac 更新 ZIP、`latest*.yml` 和 `.blockmap` 供更新程序使用；`source` 文件和 GitHub 自动生成的 Source code 是源码，不能直接运行。
 
 本项目是社区维护的开源修改版，**不是红果、西饭或河马的官方客户端，也未获平台官方背书**。不提供付费分集解锁；剧集、清晰度和可用范围取决于来源平台。
 
@@ -46,6 +48,13 @@
 2. 在「发现短剧」浏览，或在「搜索与下载」输入剧名、红果分享链接或剧集 ID。
 3. 打开详情点「立即播放」，也可选择集数与清晰度加入下载队列。
 4. 下次从「我的剧库」或「观看记录」接着看；下载进度、失败重试和整剧合并在「下载管理」。
+
+## 1.80 应用内下载安装更新
+
+- Mac 与 Windows 安装版新增应用内下载更新，显示下载进度；完成后由你点击重启安装。
+- 保留官方下载页入口，网络失败可重试；Windows 便携版继续手动下载，不会静默转换成安装版。
+- 原有用户资料位置不变，沿用设置、观看记录和下载目录；不要求清空数据或重新下载剧集。
+- 1.75 及更早版本需手动安装一次 1.80，之后才使用新版更新入口。具体验证范围见[本版发行说明](https://github.com/jackotom/hongguo-drama/releases/tag/v1.80)。
 
 ## 1.75 安全与稳定性改进
 
@@ -214,7 +223,8 @@
 - **代理测试**：可在保存前测试草稿配置，保存后生效。当前“跟随系统”主进程读取 `HTTP_PROXY` / `HTTPS_PROXY` 等环境变量，不保证识别所有系统代理或 PAC；一次测试成功不代表全部片源可访问。
 - **提醒开关**：分别控制新集检查、疑似续作、系统通知和自动检测软件更新。
 - **软件更新提示**：默认开启；启动及运行期间每 6 小时检查 GitHub 正式新版。右上角提醒可关闭，也可取消自动检测并保存；网络失败不阻止使用旧版。
-- 点击更新提醒只打开 GitHub 发行页，**不会自动下载或安装，也不强制升级**。
+- Mac 与 Windows 安装版可从更新提醒下载新版，查看进度，下载完成后点击重启安装；也可从设置中检查更新。不经点击，不自动下载或在退出时安装。
+- Windows 便携版使用官方下载页入口，退出后手动替换；更新失败不会要求清空原资料。所有版本均保留发行页入口，不强制升级。
 
 ### 9. 外观、收藏与评论
 
@@ -281,9 +291,9 @@ https://github.com/user-attachments/assets/b95f4f60-b57c-495f-a30e-62ac2b0bda11
 
 自行指定用户资料目录时以指定位置为准。移除剧库条目、删除任务记录、删除视频和清理缓存是不同操作，请核对确认框。
 
-### 为什么没有自动安装新版？
+### 怎样在应用内更新？
 
-软件只提供更新提醒与发行页入口，下载和安装由你决定。关闭提醒或自动检测后，旧版仍可继续使用；来源服务变化仍可能影响功能。
+先手动安装一次 1.80。之后，Mac 与 Windows 安装版发现新版时可点击下载，完成后再点击重启安装；Windows 便携版仍通过发行页手动下载。软件不会强制更新，也不会因为普通退出而自动安装已下载的版本。关闭提醒或自动检测后，旧版仍可继续使用；来源服务变化仍可能影响功能。
 
 ### 自行构建也有签名和公证吗？
 
@@ -295,9 +305,11 @@ https://github.com/user-attachments/assets/b95f4f60-b57c-495f-a30e-62ac2b0bda11
 
 ## 版本与验证范围
 
-当前正式版为 **1.73**，源码配置版本为 `1.73.0`。具体安装包、签名公证与验证记录，以[对应发行页](https://github.com/jackotom/hongguo-drama/releases)为准。
+当前正式版为 **1.80**，源码配置版本为 `1.80.0`。具体安装包、签名公证与验证记录，以[1.80 发行页](https://github.com/jackotom/hongguo-drama/releases/tag/v1.80)为准。
 
-1.73 两种 Mac 架构的 App 和 DMG 均已签名、公证并装订票据，安装包挂载后代码与媒体工具核验一致。Mac 成品代码使用隔离资料验证等待重试、立即重试、停止及正常本地视频播放；故障由受控模拟提供。Windows 云端成品检查通过，EXE 未签名。下载重试 14 项、下载界面 13 项及媒体恢复回归通过；真实上游与长期下载不保证全部成功。
+本版新增应用内更新。Mac 原生更新检查采用独立应用标识与签名测试包，验证 Squirrel 更新链路；这类结果不等于最终发行包字节的生产跨版本升级。Windows CI 的安装版检查覆盖隔离安装、启动和同版本重装资料保留，也不等于真实跨版本升级或实体 Windows 验证。各项实际执行结果和签名公证状态由发行页单独列明。
+
+本版不宣称修复批量下载黑屏或闪退反馈；相关问题仍需要对应设备与复现场景核实。
 
 **尚未覆盖**：实体 Windows 11、全部显卡、实体 Intel Mac、启用 Gatekeeper 的干净环境、Windows 真实网络弹幕及长期播放。云端检查和公证不能代替所有设备与网络环境的实测。
 
@@ -330,16 +342,16 @@ npm ci
 npm run build:mac
 ```
 
-上述默认命令在 Apple Silicon 上构建两种 Mac 架构。Intel 构建机请先运行 `node scripts/setup-ffmpeg-mac.js x64` 和 `npm run build:react`，再运行 `npx electron-builder --mac dmg --x64 --publish never`。
+上述默认命令在 Apple Silicon 上构建两种 Mac 架构。Intel 构建机请先运行 `node scripts/setup-ffmpeg-mac.js x64` 和 `npm run build:react`，再运行 `npx electron-builder --mac dmg zip --x64 --publish never`。
 
-构建会验证已有 FFmpeg / FFprobe 缓存；缺少匹配缓存时，从固定且经过 SHA256 校验的 FFmpeg/x264 源码编译，然后生成前端、指定架构应用和 DMG。首次构建需联网获取依赖和源码，编译可能耗时数分钟。
+构建会验证已有 FFmpeg / FFprobe 缓存；缺少匹配缓存时，从固定且经过 SHA256 校验的 FFmpeg/x264 源码编译，然后生成前端、指定架构应用、DMG 和 ZIP。首次构建需联网获取依赖和源码，编译可能耗时数分钟。默认 ZIP 只是构建产物，不能直接作为官方签名更新包发布；正式发行需在签名、公证和装订后重新生成 ZIP 与更新清单。
 
 | 用途 | 命令或产物 |
 |---|---|
 | 开发模式 | `npm run dev` |
 | 仅生成 Mac 应用 | `npm run build:mac:dir` |
 | 应用产物 | `dist/mac-arm64/红果短剧.app`、`dist/mac/红果短剧.app` |
-| DMG | `dist/红果短剧-<版本>-mac-arm64.dmg` 或 `dist/红果短剧-<版本>-mac-x64.dmg`；版本取自 `package.json` |
+| DMG / ZIP | `dist/hongguo-downloader-<版本>-mac-<架构>.dmg` 与 `.zip`；版本取自 `package.json`。正式 DMG 另以发行页中的名称提供 |
 
 ### FFmpeg 的准确对应源码
 
@@ -358,7 +370,7 @@ FFmpeg 二进制不提交到 Git。重新分发编译包时，请按 GPL 要求�
 
 ## 从源码构建 Windows 版
 
-在 Windows x64 上构建便携 EXE，需准备匹配的 FFmpeg / FFprobe；完整依赖、媒体工具源码与构建命令见 [三平台发行与 Windows 构建说明](docs/RELEASING.md)。云端构建工作流随源码提供。自行构建不会自动获得代码签名。
+在 Windows x64 上构建安装版或便携 EXE，需准备匹配的 FFmpeg / FFprobe；完整依赖、媒体工具源码与构建命令见 [三平台发行与 Windows 构建说明](docs/RELEASING.md)。云端工作流同时生成 NSIS 安装版、更新清单与便携版。自行构建不会自动获得代码签名。
 
 ## 上游、许可证与使用边界
 
