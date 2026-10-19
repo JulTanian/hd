@@ -52,6 +52,29 @@ async function runInstallerCheck() {
     child = null;
   }
 
+  async function quitAppNormally() {
+    const appProcess = child;
+    assert(appProcess && appProcess.exitCode === null && appProcess.signalCode === null, 'Application must still be running before normal quit');
+    let timer, onExit;
+    const exited = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Installed application did not quit normally within 15 seconds')), 15000);
+      onExit = (code, signal) => code === 0 && signal === null
+        ? resolve()
+        : reject(new Error(`Installed application exited abnormally: code=${code}, signal=${signal}`));
+      appProcess.once('exit', onExit);
+    });
+    try {
+      // Closing destroys this context, so only process exit can reliably acknowledge the request.
+      socket.send(JSON.stringify({ id: ++sequence, method: 'Runtime.evaluate', params: { expression: 'window.close()' } }));
+      await exited;
+      socket?.close(); socket = null;
+      child = null;
+    } finally {
+      clearTimeout(timer);
+      appProcess.removeListener('exit', onExit);
+    }
+  }
+
   function install() {
     // /D must be the final NSIS argument; this path belongs only to this CI run.
     execFileSync(setup, ['/S', '/currentuser', '/D=' + installDir], { timeout: 120000, windowsHide: true, stdio: 'pipe' });
@@ -125,13 +148,14 @@ async function runInstallerCheck() {
     result.checks.push('NSIS installs into a fresh temporary directory with the official update feed');
     await launch();
     assert.equal((await evaluate('(async () => { const settings = await window.electronAPI.getSettings(); return window.electronAPI.saveSettings({ ...settings, download_quality: "720p" }); })()')).success, true);
-    await evaluate('localStorage.setItem("hongguo-installer-smoke", "retained"); true');
-    stopApp();
+    assert.equal(await evaluate('localStorage.setItem("hongguo-installer-smoke", "retained"); localStorage.getItem("hongguo-installer-smoke")'), 'retained');
+    await quitAppNormally();
     install();
     await launch();
     assert.equal((await evaluate('window.electronAPI.getSettings()')).download_quality, '720p');
     assert.equal(await evaluate('localStorage.getItem("hongguo-installer-smoke")'), 'retained');
     assert.equal(fs.readFileSync(retainedFile, 'utf8'), 'Existing download must survive installation');
+    await quitAppNormally();
     result.checks.push('Installed application opens before and after same-version reinstall; isolated settings, local storage and existing download remain');
     result.passed = true;
     console.log('Windows NSIS smoke: PASS (installation, launch, metadata, same-version data retention)');
