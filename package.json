@@ -1,6 +1,6 @@
 {
   "name": "hongguo-downloader",
-  "version": "1.75.0",
+  "version": "1.80.0",
   "description": "红果短剧播放与下载",
   "main": "main.js",
   "license": "GPL-3.0",
@@ -17,12 +17,13 @@
     "pack": "electron-builder --dir",
     "zip": "node scripts/make-zip.js",
     "setup:ffmpeg:mac": "node scripts/setup-ffmpeg-mac.js",
-    "build:mac": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --mac dmg --arm64 --x64 --publish never",
+    "build:mac": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "build:mac:dir": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --mac --arm64 --x64 --dir --publish never"
   },
   "dependencies": {
     "anime4k-webgpu": "1.0.0",
-    "axios": "1.20.0"
+    "axios": "1.20.0",
+    "electron-updater": "6.8.9"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -48,7 +49,7 @@
       "src/store.js"
     ],
     "asar": true,
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "hongguo-downloader-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
         {
@@ -97,12 +98,19 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "红果短剧下载器",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "hongguo-downloader-${version}-win-x64-setup.${ext}"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "arm64",
             "x64"
@@ -151,6 +159,11 @@
         "Contents/Resources/bin/ffmpeg",
         "Contents/Resources/bin/ffprobe"
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "jackotom",
+      "repo": "hongguo-drama"
     }
   },
   "engines": {

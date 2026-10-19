@@ -12,6 +12,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 应用信息 / 官网链接
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   openAppUpdate: () => ipcRenderer.invoke('open-app-update'),
+  getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
+  downloadAppUpdate: () => ipcRenderer.invoke('download-app-update'),
+  installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
+  onAppUpdateState: (cb) => {
+    const listener = (_event, state) => cb(state);
+    ipcRenderer.on('app-update-state', listener);
+    return () => ipcRenderer.removeListener('app-update-state', listener);
+  },
   onAppUpdatePreference: cb => {
     const listener = (_event, enabled) => cb(enabled);
     ipcRenderer.on('app-update-preference', listener);

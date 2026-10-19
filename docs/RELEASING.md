@@ -11,13 +11,15 @@
 
 1.74 按本次明确要求从公开 1.73 增加 0.01，三段配置使用 `1.74.0`。
 
-1.75 为本轮用户指定正式版本，三段配置使用 `1.75.0`，GitHub 标签为 `v1.75`。
+1.75 的三段配置为 `1.75.0`，GitHub 标签为 `v1.75`。
+
+1.80 为本轮用户确认的正式版本，三段配置为 `1.80.0`，GitHub 标签为 `v1.80`；它严格高于 1.75。
 
 | 平台 | 构建入口 | 发布门槛 |
 |---|---|---|
 | macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证 |
 | macOS x64 | npm run build:mac | 对应 x64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证；另记录 Intel 实机覆盖 |
-| Windows x64 | Windows x64 release candidate 工作流 | 单文件便携 EXE（无需安装）及包含同一 EXE 的 ZIP；精确 FFmpeg 对应源码；单文件启动、媒体和窗口冒烟验证；明确签名状态 |
+| Windows x64 | Windows x64 release candidate 工作流 | NSIS 安装 EXE、latest.yml、便携 EXE/ZIP；精确 FFmpeg 对应源码；安装版安装/启动/同版本重装资料保留与便携版媒体窗口冒烟；明确签名状态 |
 
 Windows 工作流只上传 Actions 构建资产，不创建 Release，不改 latest，不覆盖总校验文件。正式版本由统一发行会话汇总三端资产、对应源码和总 SHA256SUMS。
 Windows 当前未配置代码签名证书；EXE 必须明确标为未签名。Windows CI 虚拟机验证不等于用户实体电脑、GPU/HEVC、真实平台下载与长期稳定性验收。
@@ -26,10 +28,20 @@ Windows 当前未配置代码签名证书；EXE 必须明确标为未签名。Wi
 ## Windows 构建
 
 Ubuntu 24.04 安装 gcc-mingw-w64-x86-64、make、pkg-config 后运行 `bash scripts/build-ffmpeg-source-win.sh BUILD_DIRECTORY 4`。
-将 artifacts/bin 内容放入 build/ffmpeg。Windows x64、Node 22.12+ 执行 `npm ci`、`npm run build:portable`。
+将 artifacts/bin 内容放入 build/ffmpeg。Windows x64、Node 22.12+ 执行 `npm ci`、`npm run build:portable`，再执行 `npx electron-builder --win nsis --x64 --publish never`。
 `node scripts/check-windows-release.cjs` 仅用于一次性 Windows CI：便携 EXE 直接启动、临时用户资料、普通 CC0 花朵视频；不要对用户现有安装运行。
 旧 `scripts/setup-ffmpeg.js` 下载 Gyan 7.1 仅保留作历史开发入口，不得用于 1.1.9 正式发行。
 
 发布必须同时提供应用精确源码 ZIP 与 FFmpeg/x264 Windows 完整对应源码 TAR.GZ。不得遗漏 Windows 专用配置、工作流和构建脚本。
 
-用户下载提供 `.exe` 与 `.zip` 两种形式。ZIP 内仅同一份便携 EXE，无需安装；对应源码归档另外提供。
+用户下载同时提供安装版 EXE、便携 EXE 与便携 ZIP。便携 ZIP 内仅同一份便携 EXE，无需安装；对应源码归档另外提供。安装版支持应用内更新，便携版保留下载页面入口，不使用 NSIS 覆盖便携文件。
+
+## 应用内更新发行门槛
+
+- 固定公开源为 `jackotom/hongguo-drama` GitHub Releases；客户端包不得包含发布令牌。
+- Mac 两种架构使用同一份 `latest-mac.yml`，`files` 中分别列出含 `arm64`、`x64` 的 ASCII ZIP 文件名、最终文件 SHA512（base64）及大小。
+- 构建产生的 ZIP 只作中间产物。正式更新 ZIP 必须从已完成 Developer ID 签名、Apple 公证与装订的最终 App 重新压缩，然后重算清单摘要；禁止沿用签名前的 ZIP、blockmap 或摘要。DMG 同样完成签名、公证、装订。
+- Windows `latest.yml` 仅指向同名 NSIS 安装包，保留 builder 生成的 SHA512、大小和 blockmap；复制上传不得再改名。安装版与便携版共享同一版本和数据格式。
+- Windows 尚无代码签名证书。SHA512 只验证下载与官方清单一致，不提供独立的发布者身份保证；不得主动关闭签名校验或声称已签名。
+- `node scripts/check-windows-installer.cjs --config` 可本机检查发行配置；不带参数仅允许一次性 GitHub Windows CI，检查安装包元数据、安装启动与同版本重装资料保留。该检查不等于真实跨版本更新验收。
+- Draft 中先汇总三端包、更新清单、准确对应源码和总校验文件，检查文件名/摘要/版本一致后统一发布为 latest。旧版 1.75 不具备下载安装能力，需要手动安装一次 1.80；后续版本才使用应用内更新。

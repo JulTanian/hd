@@ -44,11 +44,20 @@ const APP_TITLE = IS_PREVIEW ? '红果短剧预览' : '红果短剧';
 const { createStealthController } = require('./src/native/stealth-window');
 
 let mainWindow = null;
+let appUpdateInstaller = null;
+let pendingUpdateOperations = 0;
+const UPDATE_BLOCKED_CHANNELS = new Set(['hongguo-download-batch', 'download-single-episode', 'retry-task', 'retry-tasks', 'resume-all', 'merge-series', 'transcode-for-playback', 'prepare-online-play', 'save-settings']);
 const ipcMain = {
   handle(channel, handler) {
     rawIpcMain.handle(channel, async (event, ...args) => {
       if (!rendererSecurity.isTrustedSender(event, mainWindow)) throw new Error('窗口请求无效');
-      return handler(event, ...args);
+      if (appUpdateInstaller?.getState().status === 'installing' && UPDATE_BLOCKED_CHANNELS.has(channel)) {
+        return { success: false, error: '正在安装更新，请等待应用重新启动。' };
+      }
+      const blocksUpdate = UPDATE_BLOCKED_CHANNELS.has(channel);
+      if (blocksUpdate) pendingUpdateOperations++;
+      try { return await handler(event, ...args); }
+      finally { if (blocksUpdate) pendingUpdateOperations--; }
     });
   },
 };
@@ -2960,6 +2969,7 @@ ipcMain.handle('save-settings', async (event, settings) => {
     const merged = { ...getDefaultSettings(), ...(settings || {}), custom_sources:getCurrentSettings().custom_sources };
     merged.download_quality = normalizeDownloadQuality(merged.download_quality);
     store.saveSettings(merged);
+    if (merged.app_updates_enabled === false) appUpdateInstaller?.cancel();
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
       sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);
     }
@@ -3488,9 +3498,48 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
-// ===== 可关闭的新版本提醒：只检测，不下载或安装 =====
+// ===== 应用内更新：固定官方源，下载和重启均由用户确认 =====
 let updateRequest = null;
 let latestAppRelease = null;
+function appUpdateSupport() {
+  let reason = '';
+  if (IS_PREVIEW || !app.isPackaged) reason = '开发或预览版本不支持应用内安装，请使用正式安装版。';
+  else if (process.platform === 'win32' && (process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)) reason = '便携版请前往发布页下载安装版；安装版支持后续应用内更新。';
+  else if (!['darwin', 'win32'].includes(process.platform)) reason = '当前系统请前往发布页手动更新。';
+  else if (process.platform === 'darwin' && (process.execPath.startsWith('/Volumes/') || process.execPath.includes('/AppTranslocation/'))) reason = '请先将应用放入“应用程序”文件夹后重新打开，再使用应用内更新。';
+  return { supported: !reason, reason };
+}
+function appUpdateState() {
+  return appUpdateInstaller?.getState() || { ...appUpdateSupport(), status: 'idle', version: null, percent: 0, error: '' };
+}
+function getAppUpdateInstaller() {
+  if (!appUpdateInstaller) appUpdateInstaller = require('./src/native/app-update-installer').createUpdateInstaller({
+    updater: require('electron-updater').autoUpdater,
+    currentVersion: APP_VERSION,
+    isEnabled: () => !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false,
+    installBlocker: () => {
+      if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
+      if (downloadRuns.size || downloadQueue.length || sourceRetryTimers.size) return '还有下载或等待重试的任务，请先在下载管理中暂停全部任务，再安装更新。';
+      if (mergeTasks.some(task => task.status === 'running') || compatPreparing.size || onlinePreparing.size) return '正在合并或准备视频，请等待完成或取消后再安装更新。';
+      if (storageError) return '本地数据保存异常，请先处理保存问题，再安装更新。';
+      return '';
+    },
+    emit: state => sendToRenderer('app-update-state', state),
+  });
+  return appUpdateInstaller;
+}
+ipcMain.handle('get-app-update-state', () => appUpdateState());
+ipcMain.handle('download-app-update', async () => {
+  const support = appUpdateSupport();
+  if (!support.supported) return { success: false, error: support.reason };
+  if (!latestAppRelease || getCurrentSettings().app_updates_enabled === false) return { success: false, error: '更新信息已失效，请重新检查更新。' };
+  try { return await getAppUpdateInstaller().download(latestAppRelease.version); }
+  catch (_) { return { success: false, error: '无法准备应用内更新，请重试或前往发布页下载安装。' }; }
+});
+ipcMain.handle('install-app-update', () => {
+  if (!appUpdateInstaller) return { success: false, error: '请先完成更新下载。' };
+  return appUpdateInstaller.install();
+});
 ipcMain.handle('check-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
   if (getCurrentSettings().app_updates_enabled === false) {
@@ -3501,19 +3550,20 @@ ipcMain.handle('check-app-update', async event => {
     updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama/releases/latest', {
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).then(response => availableRelease(response.data, APP_VERSION)).catch(() => null)
+    }).then(response => ({ release: availableRelease(response.data, APP_VERSION), error: '' }))
+      .catch(() => ({ release: null, error: '暂时无法检查更新，请检查网络后重试。' }))
       .finally(() => { updateRequest = null; });
   }
-  const release = await updateRequest;
+  const result = await updateRequest;
   const enabled = getCurrentSettings().app_updates_enabled !== false;
-  latestAppRelease = enabled ? release : null;
-  return { enabled, release: latestAppRelease };
+  latestAppRelease = enabled ? result.release : null;
+  return { enabled, release: latestAppRelease, error: enabled ? result.error : '' };
 });
 ipcMain.handle('open-app-update', async event => {
-  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !latestAppRelease || getCurrentSettings().app_updates_enabled === false) {
+  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || getCurrentSettings().app_updates_enabled === false) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
-  try { await shell.openExternal(latestAppRelease.url); return { success: true }; }
+  try { await shell.openExternal(latestAppRelease?.url || 'https://github.com/jackotom/hongguo-drama/releases/latest'); return { success: true }; }
   catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 

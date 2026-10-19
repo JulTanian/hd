@@ -298,7 +298,9 @@ function SettingsPage({ active = true, preview = false }) {
         </> : <>
         <div className="settings-group">
           <span className="settings-label">检测更新</span>
-          <label className="proxy-switch-row"><input type="checkbox" aria-label="自动检测更新" checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">自动检测更新<em>启动时及运行期间每 6 小时检查 GitHub 正式新版。保存后生效；提醒可关闭，不影响使用旧版，不会自动下载安装。</em></span></label>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label="自动检测更新" checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">自动检测更新<em>启动时及运行期间每 6 小时检查正式新版。保存后生效；下载和重启安装都由你点击确认。</em></span></label>
+          <button type="button" className="btn btn-outline" disabled={settings.app_updates_enabled === false} onClick={() => window.dispatchEvent(new CustomEvent('hongguo-check-app-update'))}><RefreshCw size={15} />检查更新</button>
+          <p className="settings-hint">可重新打开已关闭的更新提醒、查看下载进度或安装已下载的新版。关闭检测后需重新开启并保存。</p>
         </div>
         </>}
 
