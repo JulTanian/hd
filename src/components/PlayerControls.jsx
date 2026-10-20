@@ -66,7 +66,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const reveal = () => { clearTimeout(pauseTimer); setControlsHidden(false); scheduleHide(); };
     const onKey = event => {
       const physicalKey = event.code || event.key;
-      // Keep the release paired across source/effect changes, even if Shift is released first.
+      // Giữ cặp nhả phím qua các thay đổi nguồn/hiệu ứng, kể cả khi Shift được nhả trước.
       if (event.type === 'keyup' && episodeKeysRef.current.delete(physicalKey)) return;
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return;
       const key = shortcutKey(event);
@@ -79,14 +79,14 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const onPointerMove = event => {
       const previous = pointerRef.current;
       pointerRef.current = { x: event.screenX, y: event.screenY };
-      // Native fullscreen/source changes can dispatch a move without moving the pointer.
+      // Thay đổi fullscreen native/nguồn có thể phát sự kiện move mà không di chuyển con trỏ.
       if (previous ? previous.x === event.screenX && previous.y === event.screenY : !event.movementX && !event.movementY) return;
       reveal();
     };
     const startDrag = event => { dragging = !!event.target.closest?.('input[type="range"]'); reveal(); };
     const stopDrag = () => { if (dragging) { dragging = false; reveal(); } };
     const onFocus = event => {
-      // Tab and pointerdown reveal immediately; media focus churn is not user activity.
+      // Tab và pointerdown hiện ngay; media focus thay đổi không phải hoạt động người dùng.
       if (controlsRef.current?.contains(event.target)) reveal();
       else scheduleHide();
     };
@@ -100,10 +100,10 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     window.addEventListener('pointercancel', stopDrag);
     const onBlur = () => { episodeKeysRef.current.clear(); stopDrag(); };
     window.addEventListener('blur', onBlur);
-    // Source changes and automatic handoffs are not user activity.
+    // Thay đổi nguồn và chuyển tập tự động không phải hoạt động người dùng.
     if (menuOpen || danmakuOpen || (!continuing && !available)) reveal();
     else if (!continuing && media.paused && !(media.ended && autoContinue)) {
-      // A native pause can precede ended; explicit key/click pauses already reveal immediately.
+      // Pause native có thể xảy ra trước ended; pause do phím/click đã hiện ngay.
       if (autoContinue && controlsHidden) pauseTimer = setTimeout(() => {
         if (videoRef.current?.paused && !videoRef.current.ended) reveal();
       }, 120);
@@ -182,13 +182,13 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const video = videoRef.current;
     if (!available || !video) return;
     try { if (video.paused) await video.play(); else video.pause(); }
-    catch { onError?.('暂时无法播放，请重试本集'); }
+    catch { onError?.('Tạm thời không phát được, vui lòng thử lại tập này'); }
   };
   const seek = event => {
     const video = videoRef.current;
     if (!available || !video || !media.duration) return;
     try { video.currentTime = Math.max(0, Math.min(media.duration, Number(event.target.value))); }
-    catch { onError?.('暂时无法跳转，请稍后重试'); }
+    catch { onError?.('Tạm thời không nhảy được, vui lòng thử lại sau'); }
   };
   const changeVolume = event => {
     const video = videoRef.current;
@@ -198,45 +198,45 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   };
 
   return (
-    <div ref={controlsRef} className={`player-controls ${controlsHidden ? 'controls-hidden' : ''}`} role="group" aria-label="视频播放控制">
-      <input className="player-controls-seek" type="range" aria-label="播放进度" aria-valuetext={`${formatTime(media.time)} / ${formatTime(media.duration)}`} min="0" max={media.duration || 0} step="0.1" value={Math.min(media.time, media.duration)} disabled={!available || !media.duration} onChange={seek} />
+    <div ref={controlsRef} className={`player-controls ${controlsHidden ? 'controls-hidden' : ''}`} role="group" aria-label="Điều khiển phát video">
+      <input className="player-controls-seek" type="range" aria-label="Tiến độ phát" aria-valuetext={`${formatTime(media.time)} / ${formatTime(media.duration)}`} min="0" max={media.duration || 0} step="0.1" value={Math.min(media.time, media.duration)} disabled={!available || !media.duration} onChange={seek} />
       <div className="player-controls-row">
-        <button type="button" data-player-control aria-label={media.paused ? '播放' : '暂停'} title={`播放/暂停（${formatShortcut(shortcuts.play)}）`} disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
+        <button type="button" data-player-control aria-label={media.paused ? 'Phát' : 'Tạm dừng'} title={`Phát/Tạm dừng (${formatShortcut(shortcuts.play)})`} disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
         <span className="player-controls-time">{formatTime(media.time)} / {formatTime(media.duration)}</span>
         {danmaku && <div className="player-controls-danmaku">
-          <button type="button" data-player-menu className={`danmaku-icon-button ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={danmaku.enabled ? '关闭评论弹幕' : '开启评论弹幕'} aria-pressed={danmaku.enabled}
-            title={danmaku.supported ? '将当前集公开评论显示在画面上' : '仅红果来源的当前集支持评论弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
-          <button type="button" data-player-menu className="danmaku-icon-button" ref={danmakuButtonRef} aria-label="弹幕设置" title="评论弹幕设置" aria-haspopup="dialog" aria-expanded={danmakuOpen}
+          <button type="button" data-player-menu className={`danmaku-icon-button ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={danmaku.enabled ? 'Tắt đạn bình luận' : 'Bật đạn bình luận'} aria-pressed={danmaku.enabled}
+            title={danmaku.supported ? 'Hiển thị bình luận công khai của tập hiện tại trên màn hình' : 'Chỉ tập hiện tại từ nguồn Hồng Quả mới hỗ trợ đạn bình luận'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
+          <button type="button" data-player-menu className="danmaku-icon-button" ref={danmakuButtonRef} aria-label="Cài đặt đạn" title="Cài đặt đạn bình luận" aria-haspopup="dialog" aria-expanded={danmakuOpen}
             onClick={() => { setMenuOpen(false); setDanmakuOpen(open => !open); }}>
             <span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-settings-mark"><SettingsIcon size={10} /></span></span>
           </button>
           {danmakuOpen && <DanmakuSettings danmaku={danmaku} onClose={closeDanmaku} panelRef={danmakuPanelRef} maxHeight={danmakuHeight} />}
         </div>}
         <div className="player-controls-volume">
-          <button type="button" data-player-control aria-label={media.muted ? '取消静音' : '静音'} onClick={() => { const video = videoRef.current; if (video) video.muted = !video.muted; }}>
+          <button type="button" data-player-control aria-label={media.muted ? 'Bỏ tắt tiếng' : 'Tắt tiếng'} onClick={() => { const video = videoRef.current; if (video) video.muted = !video.muted; }}>
             <Icon><path d="M11 5 6 9H3v6h3l5 4Z" />{media.muted ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" />}</Icon>
           </button>
-          <input type="range" aria-label="音量" aria-valuetext={`${Math.round((media.muted ? 0 : media.volume) * 100)}%`} min="0" max="1" step="0.05" value={media.muted ? 0 : media.volume} onChange={changeVolume} />
+          <input type="range" aria-label="Âm lượng" aria-valuetext={`${Math.round((media.muted ? 0 : media.volume) * 100)}%`} min="0" max="1" step="0.05" value={media.muted ? 0 : media.volume} onChange={changeVolume} />
         </div>
-        <button type="button" data-player-control aria-label={expanded ? '退出全屏' : '全屏'} title={`${expanded ? '退出全屏' : portrait ? '填满当前窗口' : '全屏'}（${formatShortcut(shortcuts.fullscreen)}）`} onClick={onToggleFullscreen}>
+        <button type="button" data-player-control aria-label={expanded ? 'Thoát toàn màn hình' : 'Toàn màn hình'} title={`${expanded ? 'Thoát toàn màn hình' : portrait ? 'Lấp đầy cửa sổ hiện tại' : 'Toàn màn hình'} (${formatShortcut(shortcuts.fullscreen)})`} onClick={onToggleFullscreen}>
           <Icon><path d={expanded ? 'M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6'} /></Icon>
         </button>
-        <button type="button" data-player-control className="player-controls-rate" aria-label="增加播放速度" title={`播放速度 ${rate}×，点击增加 0.25 倍，4 倍后回到 1 倍`} onClick={() => onRateChange(rate >= 4 ? 1 : Math.min(4, rate + 0.25))}>{rate}×</button>
+        <button type="button" data-player-control className="player-controls-rate" aria-label="Tăng tốc độ phát" title={`Tốc độ phát ${rate}×, nhấp để tăng 0.25 lần, đến 4 lần sẽ quay về 1 lần`} onClick={() => onRateChange(rate >= 4 ? 1 : Math.min(4, rate + 0.25))}>{rate}×</button>
         <div className="player-controls-options" data-player-menu ref={menuRef}>
-          <button type="button" ref={menuButtonRef} aria-label="更多播放选项" title="更多播放选项" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => { setDanmakuOpen(false); setMenuOpen(open => !open); }}>
+          <button type="button" ref={menuButtonRef} aria-label="Thêm tùy chọn phát" title="Thêm tùy chọn phát" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => { setDanmakuOpen(false); setMenuOpen(open => !open); }}>
             <Icon><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></Icon>
           </button>
-          {menuOpen && <div className="player-controls-menu" style={{ maxHeight: menuHeight }} role="dialog" aria-label="播放选项">
-            <label>播放速度<select ref={speedRef} aria-label="播放速度" value={rate} onChange={event => onRateChange(Number(event.target.value))}>
+          {menuOpen && <div className="player-controls-menu" style={{ maxHeight: menuHeight }} role="dialog" aria-label="Tùy chọn phát">
+            <label>Tốc độ phát<select ref={speedRef} aria-label="Tốc độ phát" value={rate} onChange={event => onRateChange(Number(event.target.value))}>
               {Array.from({ length: 16 }, (_, index) => (index + 1) / 4).map(value => <option key={value} value={value}>{value}×</option>)}
             </select></label>
-            <label className="player-picture-mode">画面模式<select aria-label="画面模式" aria-describedby="picture-mode-hint" value={pictureMode} onChange={event => onPictureModeChange(event.target.value)}>
-              <option value="fit">适应窗口</option>
-              <option value="width">保持宽度</option>
+            <label className="player-picture-mode">Chế độ hình ảnh<select aria-label="Chế độ hình ảnh" aria-describedby="picture-mode-hint" value={pictureMode} onChange={event => onPictureModeChange(event.target.value)}>
+              <option value="fit">Vừa cửa sổ</option>
+              <option value="width">Giữ chiều rộng</option>
             </select></label>
-            <span id="picture-mode-hint">{pictureMode === 'width' ? '按宽度显示，上下可能裁剪。按剧单独记忆。' : '完整显示，随窗口缩放。按剧单独记忆。'}</span>
+            <span id="picture-mode-hint">{pictureMode === 'width' ? 'Hiển thị theo chiều rộng, có thể cắt trên/dưới. Ghi nhớ riêng cho từng phim.' : 'Hiển thị đầy đủ, co giãn theo cửa sổ. Ghi nhớ riêng cho từng phim.'}</span>
             {enhancement && <VideoEnhancementControls enhancement={enhancement} available={available} />}
-            {SHORTCUT_ACTIONS.map(action => <span key={action.id}>{formatShortcut(shortcuts[action.id])}：{action.label}</span>)}
+            {SHORTCUT_ACTIONS.map(action => <span key={action.id}>{formatShortcut(shortcuts[action.id])}: {action.label}</span>)}
           </div>}
         </div>
       </div>
