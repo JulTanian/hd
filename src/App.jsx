@@ -15,14 +15,14 @@ import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
 
 const MENU = [
-  { id: 'browse', label: '发现短剧', icon: Home },
-  { id: 'feed', label: '热播推荐', icon: Film },
-  { id: 'download', label: '搜索与下载', icon: Search },
-  { id: 'player', label: '我的剧库', icon: Play },
-  { id: 'history', label: '观看记录', icon: Clock },
-  { id: 'calendar', label: '收藏与上新', icon: Clock },
-  { id: 'manager', label: '下载管理', icon: Download },
-  { id: 'settings', label: '设置', icon: Settings },
+  { id: 'browse', label: 'Khám phá phim ngắn', icon: Home },
+  { id: 'feed', label: 'Đề xuất hot', icon: Film },
+  { id: 'download', label: 'Tìm kiếm & Tải xuống', icon: Search },
+  { id: 'player', label: 'Thư viện phim của tôi', icon: Play },
+  { id: 'history', label: 'Lịch sử xem', icon: Clock },
+  { id: 'calendar', label: 'Yêu thích & Cập nhật mới', icon: Clock },
+  { id: 'manager', label: 'Quản lý tải xuống', icon: Download },
+  { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
 export default function App() {
@@ -41,9 +41,9 @@ export default function App() {
   const [storageError, setStorageError] = useState('');
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
   const [playerMounted, setPlayerMounted] = useState(false);
-  const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
+  const [playerTarget, setPlayerTarget] = useState(null); // Trang khám phá phát -> chọn ở trang phát
   const rememberPlayerSeries = useCallback((seriesId) => {
-    // 保留命令时间戳避免重复初始化；重新挂载时只按当前系列的最新断点恢复。
+    // Giữ timestamp lệnh để tránh khởi tạo trùng; khi remount chỉ khôi phục theo điểm dừng mới nhất của series hiện tại.
     setPlayerTarget(target => ({ seriesId, resume: true, ts: target?.ts }));
   }, []);
 
@@ -56,10 +56,10 @@ export default function App() {
   }, []);
 
   useEffect(() => window.electronAPI.onStorageError?.((data) => {
-    setStorageError(data?.error || '数据保存失败，请检查磁盘空间和目录权限后重试。');
+    setStorageError(data?.error || 'Lưu dữ liệu thất bại, vui lòng kiểm tra dung lượng ổ đĩa và quyền thư mục rồi thử lại.');
   }), []);
 
-  // 主进程发来的导航指令（例如浏览页点「立即播放」）
+  // Lệnh điều hướng từ main process (ví dụ trang khám phá bấm "Phát ngay")
   useEffect(() => {
     if (!window.electronAPI.onNavigate) return undefined;
     return window.electronAPI.onNavigate((data) => {
@@ -89,7 +89,7 @@ export default function App() {
         return <ReleaseCalendar onPlay={async ({ seriesId }) => {
           try {
             const result = await window.electronAPI.searchResolve(seriesId);
-            if (!result?.success) throw new Error(result?.error || '加载剧集失败，请重试');
+            if (!result?.success) throw new Error(result?.error || 'Tải tập phim thất bại, vui lòng thử lại');
             setPlayerTarget({ seriesId, ts: Date.now() });
             navigate('player');
           } catch (error) { setStorageError(error.message); }
@@ -117,7 +117,7 @@ export default function App() {
       if (!result.success) throw new Error(result.error);
       setLayout(result.mode);
     } catch (error) {
-      setStorageError(error.message || '切换失败，请重试。');
+      setStorageError(error.message || 'Chuyển đổi thất bại, vui lòng thử lại.');
     } finally {
       layoutLock.current = false;
       setLayoutBusy(false);
@@ -129,14 +129,14 @@ export default function App() {
 
   return (
     <div className={`app-layout ${stealthMode ? 'stealth-mode' : ''} ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
-      <aside className="sidebar" aria-label="主导航">
+      <aside className="sidebar" aria-label="Điều hướng chính">
         <div className="sidebar-window-drag" aria-hidden="true" />
         <div className="sidebar-brand">
           <div className="logo"><Play size={21} /></div>
-          <div><div className="brand-text">{appInfo?.appName || '红果短剧'}</div><div className="brand-sub">{appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待'}</div></div>
+          <div><div className="brand-text">{appInfo?.appName || 'Hồng Quả Việt Nam'}</div><div className="brand-sub">{appInfo?.preview ? 'Trải nghiệm độc lập · Lưu trên máy' : 'Mỗi tập phim, đều đáng để chờ đợi'}</div></div>
         </div>
         <nav className="sidebar-menu">
-          <div className="sidebar-group-label">内容</div>
+          <div className="sidebar-group-label">Nội dung</div>
           {MENU.filter((item) => item.id !== 'settings').map((item) => {
             const Icon = item.icon;
             return (
@@ -150,9 +150,9 @@ export default function App() {
         <div className="sidebar-footer">
           <button className={`sidebar-item ${page === 'settings' ? 'active' : ''}`}
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
-            <Settings size={19} /><span>设置</span>
+            <Settings size={19} /><span>Cài đặt</span>
           </button>
-          <div className="footer-note"><span>{appInfo?.preview ? '功能预览' : '红果短剧'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
+          <div className="footer-note"><span>{appInfo?.preview ? 'Xem trước tính năng' : 'Hồng Quả Việt Nam'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
         </div>
       </aside>
       <div className="main-wrapper">
@@ -160,37 +160,37 @@ export default function App() {
           <span className="toolbar-location">{currentPage?.label}</span>
           {page === 'player' && layout === 'portrait' && <PageMenu items={MENU} page={page} onNavigate={navigate} />}
           <div className="toolbar-actions">
-            <span className="toolbar-caption">{appInfo?.preview ? '功能预览' : '红果短剧'}</span>
-            {page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title="鼠标移开时暂停隐藏，移回继续；Esc 退出">隐身小窗</button>}
+            <span className="toolbar-caption">{appInfo?.preview ? 'Xem trước tính năng' : 'Hồng Quả Việt Nam'}</span>
+            {page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title="Tự động tạm dừng và ẩn khi di chuột ra ngoài, tiếp tục khi di chuột vào; Esc để thoát">Cửa sổ ẩn danh</button>}
             {page === 'player' && layout === 'portrait' && <button className="btn btn-outline btn-sm portrait-episodes-toggle" aria-expanded={episodesOpen}
-              aria-controls="player-episode-panel" onClick={() => setEpisodesOpen(open => !open)}>{episodesOpen ? '收起选集' : '选集'}</button>}
+              aria-controls="player-episode-panel" onClick={() => setEpisodesOpen(open => !open)}>{episodesOpen ? 'Thu gọn danh sách tập' : 'Chọn tập'}</button>}
             {page === 'player' && <button className="btn btn-outline btn-sm player-actions-toggle" aria-pressed={actionsHidden || borderless && layout === 'portrait'}
               onClick={() => {
                 if (borderless && layout === 'portrait') { setBorderless(false); setActionsHidden(false); }
                 else setActionsHidden(hidden => !hidden);
-              }}>{actionsHidden || borderless && layout === 'portrait' ? '显示按钮' : '隐藏按钮'}</button>}
+              }}>{actionsHidden || borderless && layout === 'portrait' ? 'Hiện nút' : 'Ẩn nút'}</button>}
             {page === 'player' && layout === 'portrait' && <button className="btn btn-outline btn-sm borderless-toggle" aria-pressed={borderless}
-              onClick={() => setBorderless(value => !value)}>{borderless ? '恢复边框' : '去掉边框'}</button>}
+              onClick={() => setBorderless(value => !value)}>{borderless ? 'Khôi phục viền' : 'Bỏ viền'}</button>}
             <button className="btn btn-outline btn-sm pin-toggle" aria-pressed={alwaysOnTop} disabled={pinBusy}
-              aria-label={alwaysOnTop ? '取消置顶' : '置顶'} title={alwaysOnTop ? '取消置顶' : '置顶'}
+              aria-label={alwaysOnTop ? 'Bỏ ghim' : 'Ghim'} title={alwaysOnTop ? 'Bỏ ghim' : 'Ghim'}
               onClick={async () => {
                 setPinBusy(true);
                 try { setAlwaysOnTop(await window.electronAPI.setAlwaysOnTop(!alwaysOnTop)); }
-                catch { setStorageError('置顶切换失败，请重试。'); }
+                catch { setStorageError('Chuyển đổi ghim thất bại, vui lòng thử lại.'); }
                 finally { setPinBusy(false); }
               }}><svg width="17" height="17" viewBox="0 0 24 24" fill={alwaysOnTop ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 3h8l-1 6 4 4v2H5v-2l4-4-1-6Z" /><path d="M12 15v6" /></svg></button>
             <button className="btn btn-outline btn-sm layout-toggle" onClick={toggleLayout}
               disabled={layoutBusy} aria-pressed={layout === 'portrait'}
-              aria-label={layout === 'portrait' ? '切换横屏版' : '切换竖屏版'}
-              title={layout === 'portrait' ? '恢复横屏窗口与布局' : '切换竖屏窗口，放大竖屏视频'}>
+              aria-label={layout === 'portrait' ? 'Chuyển sang bản ngang' : 'Chuyển sang bản dọc'}
+              title={layout === 'portrait' ? 'Khôi phục cửa sổ và bố cục ngang' : 'Chuyển sang cửa sổ dọc, phóng to video dọc'}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
                 {layout === 'portrait' ? <rect x="3" y="6" width="18" height="12" rx="2" /> : <rect x="6" y="3" width="12" height="18" rx="2" />}
               </svg>
-              {layoutBusy ? '切换中…' : layout === 'portrait' ? '横屏版' : '竖屏版'}
+              {layoutBusy ? 'Đang chuyển…' : layout === 'portrait' ? 'Bản ngang' : 'Bản dọc'}
             </button>
           </div>
         </header>
-        <nav className="compact-navigation" aria-label="竖屏导航">
+        <nav className="compact-navigation" aria-label="Điều hướng dọc">
           {MENU.map((item) => {
             const Icon = item.icon;
             return <button key={item.id} aria-current={page === item.id ? 'page' : undefined}
@@ -198,9 +198,9 @@ export default function App() {
           })}
         </nav>
         {!appInfo?.preview && <AppUpdateNotice />}
-        {stealthMode && <div className="stealth-toolbar"><span>移开暂停隐藏 · 移回继续</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>退出小窗</button></div>}
+        {stealthMode && <div className="stealth-toolbar"><span>Di chuột ra để tạm dừng và ẩn · Di chuột vào để tiếp tục</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>Thoát cửa sổ nhỏ</button></div>}
         {stealthError && <div className="app-storage-error" role="alert">{stealthError}</div>}
-        {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}
+        {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>Đóng thông báo</button></div>}
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>
     </div>
