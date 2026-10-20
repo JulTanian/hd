@@ -1,17 +1,17 @@
-// Match whole tokens; clamp iteration to the actual episode count.
+// Khớp toàn bộ token; giới hạn vòng lặp theo số tập thực tế.
 export function parseEpisodeRange(value, total) {
   const parts = String(value || '').trim().split(/[,，]/);
   const selected = new Set();
   for (const part of parts) {
     const match = part.trim().match(/^(\d+)(?:\s*[-~～]\s*(\d+))?$/);
-    if (!match) throw new Error('集数格式不正确，请输入 1-30 或 1，5，10；原选择已保留。');
+    if (!match) throw new Error('Định dạng số tập không chính xác, vui lòng nhập 1-30 hoặc 1,5,10; lựa chọn cũ được giữ nguyên.');
     const a = Number(match[1]), b = Number(match[2] || match[1]);
     if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || a < 1 || b < 1) {
-      throw new Error('集数必须是大于 0 的整数；原选择已保留。');
+      throw new Error('Số tập phải là số nguyên lớn hơn 0; lựa chọn cũ được giữ nguyên.');
     }
     for (let n = Math.max(1, Math.min(a, b)); n <= Math.min(total, Math.max(a, b)); n++) selected.add(n);
   }
-  if (!selected.size) throw new Error(`集数超出范围，请选择 1-${total} 集；原选择已保留。`);
+  if (!selected.size) throw new Error(`Số tập vượt quá phạm vi, vui lòng chọn từ 1-${total} tập; lựa chọn cũ được giữ nguyên.`);
   return selected;
 }
 
