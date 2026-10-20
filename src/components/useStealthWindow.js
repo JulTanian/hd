@@ -13,7 +13,7 @@ export default function useStealthWindow() {
     try {
       if (enabled && document.fullscreenElement) await document.exitFullscreen();
       const result = await window.electronAPI.setStealthMode(enabled);
-      if (!result?.success) throw new Error(result?.error || '小窗切换失败，请重试');
+      if (!result?.success) throw new Error(result?.error || 'Chuyển đổi cửa sổ nhỏ thất bại, vui lòng thử lại');
     } catch (error) { setStealthError(error.message); }
     finally { busy.current = false; }
   };
@@ -28,7 +28,7 @@ export default function useStealthWindow() {
       const saved = resume.current;
       resume.current = null;
       if (saved && saved.video === video && saved.source === video.currentSrc && video.isConnected) {
-        video.play().catch(() => setStealthError('已恢复窗口，请点击播放继续'));
+        video.play().catch(() => setStealthError('Đã khôi phục cửa sổ, vui lòng nhấp phát để tiếp tục'));
       }
     }
   }), []);
