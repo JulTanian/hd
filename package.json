@@ -1,7 +1,7 @@
 {
   "name": "hongguo-downloader",
   "version": "1.80.0",
-  "description": "红果短剧播放与下载",
+  "description": "Hồng Quả Việt Nam - Phát và tải phim ngắn",
   "main": "main.js",
   "license": "GPL-3.0",
   "scripts": {
@@ -37,7 +37,7 @@
   },
   "build": {
     "appId": "io.github.jackotom.hongguo-drama-mac",
-    "productName": "红果短剧",
+    "productName": "Hong Qua Viet Nam",
     "directories": {
       "output": "dist"
     },
@@ -90,14 +90,14 @@
       ]
     },
     "portable": {
-      "artifactName": "${productName}-${version}-便携版.${ext}"
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "红果短剧下载器",
+      "shortcutName": "Hong Qua Viet Nam",
       "artifactName": "hongguo-downloader-${version}-win-x64-setup.${ext}"
     },
     "mac": {
