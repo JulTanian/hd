@@ -16,7 +16,7 @@ function applyTheme(preference) {
 }
 
 export function setThemePreference(preference) {
-  if (!PREFERENCES.includes(preference)) throw new Error('请选择浅色、深色或跟随系统');
+  if (!PREFERENCES.includes(preference)) throw new Error('Vui lòng chọn Sáng, Tối hoặc Theo hệ thống');
   window.localStorage.setItem(STORAGE_KEY, preference);
   applyTheme(preference);
 }
