@@ -15,7 +15,7 @@ function HongguoDownload({ onNavigate, active = true }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // 短剧解析结果
+  // Kết quả phân tích phim ngắn
   const [seriesData, setSeriesData] = useState(null); // { series_id, series_title, cover, total, episodes: [...] }
   const [selectedVids, setSelectedVids] = useState(new Set());
   const [rangeInput, setRangeInput] = useState('');
@@ -42,7 +42,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     window.electronAPI.getSettings().then((settings) => {
       if (!cancelled) setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
     }).catch(() => {
-      if (!cancelled) setErrorMsg('默认下载清晰度读取失败，请确认清晰度后再下载');
+      if (!cancelled) setErrorMsg('Đọc độ phân giải tải mặc định thất bại, vui lòng xác nhận độ phân giải trước khi tải');
     }).finally(() => { if (!cancelled) setQualityLoading(false); });
     return () => { cancelled = true; };
   }, [active]);
@@ -55,7 +55,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     setTab(next);
   };
 
-  // 搜索选中一部剧后：复用既有的选集下载界面
+  // Sau khi tìm kiếm chọn một bộ phim: tái sử dụng giao diện chọn tập tải có sẵn
   const handleSeriesFromSearch = (data) => {
     if (searchVersion !== resolveRequest.current) return;
     resolveRequest.current++;
@@ -65,14 +65,14 @@ function HongguoDownload({ onNavigate, active = true }) {
     setTab('input');
     setSeriesData(data);
     setSelectedVids(new Set(data.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid)));
-    setSuccessMsg(`已选中《${data.series_title}》共 ${data.total} 集，可直接播放或提交下载`);
+    setSuccessMsg(`Đã chọn《${data.series_title}》tổng ${data.total} tập, có thể phát ngay hoặc gửi yêu cầu tải`);
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 解析红果短剧
+  // Phân tích phim ngắn Hồng Quả
   const handleResolve = async () => {
     if (!inputUrl.trim()) {
-      setErrorMsg('请输入红果短剧分享链接或剧集 ID');
+      setErrorMsg('Vui lòng nhập link chia sẻ hoặc ID phim ngắn Hồng Quả');
       return;
     }
     const value = inputUrl.trim();
@@ -91,22 +91,22 @@ function HongguoDownload({ onNavigate, active = true }) {
       if (request !== resolveRequest.current) return;
       if (res?.success && res.data) {
         setSeriesData(res.data);
-        // 默认全选，网页未提供的集数自动尝试 App 片源。
+        // Mặc định chọn tất cả, các tập web không cung cấp sẽ tự động thử nguồn App.
         const allVids = new Set(res.data.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid));
         setSelectedVids(allVids);
-        setSuccessMsg(`解析成功！找到《${res.data.series_title}》共 ${res.data.total} 集`);
+        setSuccessMsg(`Phân tích thành công! Tìm thấy《${res.data.series_title}》tổng ${res.data.total} tập`);
       } else {
-        setErrorMsg(res?.error || '解析失败，请检查链接或网络');
+        setErrorMsg(res?.error || 'Phân tích thất bại, vui lòng kiểm tra link hoặc mạng');
       }
     } catch (err) {
-      if (request === resolveRequest.current) setErrorMsg('解析过程出现错误: ' + err.message);
+      if (request === resolveRequest.current) setErrorMsg('Quá trình phân tích gặp lỗi: ' + err.message);
     } finally {
       if (pendingResolve.current?.request === request) pendingResolve.current = null;
       if (request === resolveRequest.current) setLoading(false);
     }
   };
 
-  // 勾选/取消勾选单集
+  // Chọn/bỏ chọn một tập
   const toggleVid = (vid) => {
     if (!seriesData?.episodes.some((ep) => ep.vid === vid && !ep.locked)) return;
     const next = new Set(selectedVids);
@@ -118,13 +118,13 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(next);
   };
 
-  // 全选
+  // Chọn tất cả
   const handleSelectAll = () => {
     if (!seriesData) return;
     setSelectedVids(new Set(seriesData.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid)));
   };
 
-  // 反选
+  // Đảo chọn
   const handleInvertSelect = () => {
     if (!seriesData) return;
     const next = new Set();
@@ -136,12 +136,12 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(next);
   };
 
-  // 清空选择
+  // Xóa hết lựa chọn
   const handleDeselectAll = () => {
     setSelectedVids(new Set());
   };
 
-  // 快捷集数选择
+  // Chọn nhanh theo tập
   const handleQuickSelect = (type) => {
     if (!seriesData || !seriesData.episodes) return;
     const eps = seriesData.episodes;
@@ -157,7 +157,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(new Set(targetEps.filter((ep) => !ep.locked).map((ep) => ep.vid)));
   };
 
-  // 根据区间字符串应用筛选 (如 "1-30" 或 "1,5,10-20")
+  // Áp dụng lọc theo khoảng (như "1-30" hoặc "1,5,10-20")
   const handleApplyRange = () => {
     if (!seriesData?.episodes) return;
     try {
@@ -175,19 +175,19 @@ function HongguoDownload({ onNavigate, active = true }) {
     setErrorMsg('');
     try {
       const res = await window.electronAPI.playSeries({ seriesId: seriesData.series_id, vidIndex: firstPlayable.vid_index });
-      if (!res?.success && request === resolveRequest.current) setErrorMsg(res?.error || '打开播放器失败，请重试');
+      if (!res?.success && request === resolveRequest.current) setErrorMsg(res?.error || 'Mở trình phát thất bại, vui lòng thử lại');
     } catch (error) {
-      if (request === resolveRequest.current) setErrorMsg('打开播放器失败: ' + error.message);
+      if (request === resolveRequest.current) setErrorMsg('Mở trình phát thất bại: ' + error.message);
     } finally {
       playPending.current = false;
       setOpeningPlayer(false);
     }
   };
 
-  // 提交批量下载
+  // Gửi yêu cầu tải hàng loạt
   const handleBatchDownload = async () => {
     if (!seriesData || selectedVids.size === 0) {
-      setErrorMsg('请至少勾选一集欲下载的短剧');
+      setErrorMsg('Vui lòng chọn ít nhất một tập muốn tải');
       return;
     }
     setSubmitting(true);
@@ -202,12 +202,12 @@ function HongguoDownload({ onNavigate, active = true }) {
         quality: downloadQuality,
       });
       if (res.success) {
-        setSuccessMsg(`已成功将 ${res.count} 集提交至下载队列！点击下方按钮跳转至“下载管理”查看实时进度。`);
+        setSuccessMsg(`Đã gửi thành công ${res.count} tập vào hàng đợi tải! Nhấp nút bên dưới để chuyển sang "Quản lý tải xuống" xem tiến độ.`);
       } else {
-        setErrorMsg(res.error || '提交下载失败');
+        setErrorMsg(res.error || 'Gửi yêu cầu tải thất bại');
       }
     } catch (err) {
-      setErrorMsg('提交下载异常: ' + err.message);
+      setErrorMsg('Gửi yêu cầu tải lỗi: ' + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -215,32 +215,32 @@ function HongguoDownload({ onNavigate, active = true }) {
 
   return (
     <div className="hongguo-container">
-      {/* 头部 Banner 区 */}
+      {/* Khu vực Banner đầu trang */}
       <div className="hongguo-hero">
         <div className="hero-icon">
           <Film size={32} />
         </div>
         <div className="hero-text">
-          <h2>找到下一部好剧</h2>
-          <p>搜一个剧名，或粘贴分享链接。选择喜欢的集数，保存到本地慢慢看。</p>
+          <h2>Tìm bộ phim tiếp theo thật hay</h2>
+          <p>Tìm một tên phim, hoặc dán link chia sẻ. Chọn tập bạn thích, lưu về máy xem dần.</p>
         </div>
       </div>
 
-      {/* 方式切换 */}
+      {/* Chuyển chế độ */}
       <div className="mode-tabs">
         <button
           className={`mode-tab ${tab === 'search' ? 'active' : ''}`}
           onClick={() => switchTab('search')}
         >
           <Search size={16} />
-          <span>搜索剧集</span>
+          <span>Tìm phim</span>
         </button>
         <button
           className={`mode-tab ${tab === 'input' ? 'active' : ''}`}
           onClick={() => switchTab('input')}
         >
           <Link2 size={16} />
-          <span>粘贴链接 / ID</span>
+          <span>Dán link / ID</span>
         </button>
       </div>
 
@@ -252,18 +252,18 @@ function HongguoDownload({ onNavigate, active = true }) {
         />
       </div>
       {tab === 'input' && (
-        /* 解析输入卡片 */
+        /* Thẻ nhập phân tích */
         <div className="hongguo-card">
           <div className="card-header-title">
             <Link2 size={18} />
-            <span>输入短剧链接或 ID</span>
+            <span>Nhập link hoặc ID phim ngắn</span>
           </div>
           <div className="input-group">
             <input
               type="text"
               className="input-field"
-              aria-label="短剧分享链接或剧集 ID"
-              placeholder="粘贴短剧分享链接，或输入剧集 ID"
+              aria-label="Link chia sẻ hoặc ID phim ngắn"
+              placeholder="Dán link chia sẻ phim ngắn, hoặc nhập ID phim"
               value={inputUrl}
               onChange={(e) => { resolveRequest.current++; pendingResolve.current = null; setLoading(false); setInputUrl(e.target.value); }}
               onKeyDown={(e) => isSubmitKey(e) && handleResolve()}
@@ -271,24 +271,24 @@ function HongguoDownload({ onNavigate, active = true }) {
             <button className="btn btn-outline" disabled={loading} onClick={async () => {
               try {
                 const text = (await navigator.clipboard.readText()).trim();
-                if (!text || text.length > 4096) throw new Error('剪贴板为空或内容过长，请手动粘贴短剧链接');
+                if (!text || text.length > 4096) throw new Error('Clipboard trống hoặc nội dung quá dài, vui lòng dán link thủ công');
                 resolveRequest.current++;
                 pendingResolve.current = null;
                 setInputUrl(text);
                 setErrorMsg('');
-                setSuccessMsg('已粘贴，请确认链接后获取剧集');
-              } catch (error) { setErrorMsg(error.message || '读取剪贴板失败，请手动粘贴'); }
-            }}>粘贴链接</button>
+                setSuccessMsg('Đã dán, vui lòng xác nhận link rồi lấy tập phim');
+              } catch (error) { setErrorMsg(error.message || 'Đọc clipboard thất bại, vui lòng dán thủ công'); }
+            }}>Dán link</button>
             <button className="btn btn-primary" onClick={handleResolve} disabled={loading}>
               {loading ? (
                 <>
                   <RefreshCw size={16} className="spin" />
-                  <span>解析中...</span>
+                  <span>Đang phân tích...</span>
                 </>
               ) : (
                 <>
                   <Film size={16} />
-                  <span>获取剧集</span>
+                  <span>Lấy tập phim</span>
                 </>
               )}
             </button>
@@ -299,7 +299,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 搜索模式下的提示信息（解析卡片被替换了，这里单独显示） */}
+      {/* Thông báo ở chế độ tìm kiếm (thẻ phân tích bị thay thế, hiển thị riêng ở đây) */}
       {tab === 'search' && (errorMsg || successMsg) && (
         <div className="hongguo-card" style={{ marginTop: 0 }}>
           {errorMsg && <div className="alert alert-error" role="alert">{errorMsg}</div>}
@@ -307,10 +307,10 @@ function HongguoDownload({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 剧集列表与选择控制 */}
+      {/* Danh sách tập và điều khiển chọn */}
       {seriesData && (
         <div className="hongguo-card episode-section">
-          {/* 短剧元信息 */}
+          {/* Thông tin phim */}
           <div className="series-header">
             <div className="series-info">
               {seriesData.cover ? (
@@ -324,8 +324,8 @@ function HongguoDownload({ onNavigate, active = true }) {
                 <h3 className="series-title">《{seriesData.series_title}》</h3>
                 <div className="series-tags">
                   <span className="badge">{mediaSourceLabel(seriesData.series_id, mediaSources)}</span>
-                  <span className="badge">共 {seriesData.total} 集</span>
-                  <span className="badge badge-secondary">已选 {selectedVids.size} 集</span>
+                  <span className="badge">Tổng {seriesData.total} tập</span>
+                  <span className="badge badge-secondary">Đã chọn {selectedVids.size} tập</span>
                 </div>
               </div>
             </div>
@@ -333,16 +333,16 @@ function HongguoDownload({ onNavigate, active = true }) {
             <div className="batch-action-bar">
               <button className="btn btn-outline" onClick={handlePlay}
                 disabled={openingPlayer || !firstPlayable}
-                title={firstPlayable ? '在我的剧库播放，未下载的分集会在线播放' : '当前剧集没有可播放的分集'}>
+                title={firstPlayable ? 'Phát trong thư viện phim của tôi, tập chưa tải sẽ phát trực tuyến' : 'Phim hiện tại không có tập nào phát được'}>
                 {openingPlayer ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
-                <span>{openingPlayer ? '正在打开…' : '立即播放'}</span>
+                <span>{openingPlayer ? 'Đang mở…' : 'Phát ngay'}</span>
               </button>
               <label className="batch-quality-control">
-                <span>下载清晰度</span>
+                <span>Độ phân giải tải</span>
                 <select className="input-field" value={downloadQuality}
                   aria-describedby="batch-quality-hint" disabled={qualityLoading || submitting}
                   onChange={(event) => setDownloadQuality(event.target.value)}>
-                  <option value="auto">自动（兼容优先）</option>
+                  <option value="auto">Tự động (ưu tiên tương thích)</option>
                   <option value="1080p">1080P</option>
                   <option value="720p">720P</option>
                 </select>
@@ -353,53 +353,53 @@ function HongguoDownload({ onNavigate, active = true }) {
                 disabled={qualityLoading || submitting || selectedVids.size === 0}
               >
                 <Download size={16} />
-                <span>下载选中集数 ({selectedVids.size}/{seriesData.total})</span>
+                <span>Tải tập đã chọn ({selectedVids.size}/{seriesData.total})</span>
               </button>
               {onNavigate && (
                 <button className="btn btn-outline" onClick={() => onNavigate('manager')}>
                   <Folder size={16} />
-                  <span>查看下载管理</span>
+                  <span>Xem quản lý tải xuống</span>
                 </button>
               )}
             </div>
           </div>
 
-          <p className="settings-hint batch-quality-hint" id="batch-quality-hint">新建下载任务生效；所选清晰度不可用时提示，不自动降级。已有文件不自动删除或覆盖。</p>
+          <p className="settings-hint batch-quality-hint" id="batch-quality-hint">Có hiệu lực cho tác vụ tải mới; nếu độ phân giải đã chọn không khả dụng sẽ có thông báo, không tự động hạ cấp. File đã có sẽ không tự động xóa hoặc ghi đè.</p>
 
           {seriesData.web_accessible_episodes != null && seriesData.web_accessible_episodes < seriesData.total && (
-            <p className="settings-hint">网页源提供前 {seriesData.web_accessible_episodes} 集，后续集数自动尝试 App 片源。</p>
+            <p className="settings-hint">Nguồn web cung cấp {seriesData.web_accessible_episodes} tập đầu, các tập sau sẽ tự động thử nguồn App.</p>
           )}
 
-          {seriesData.episodes.some((ep) => ep.locked) && <p className="settings-hint">锁定集需在来源平台解锁，本应用不提供解锁；全选和范围选择会自动跳过。</p>}
+          {seriesData.episodes.some((ep) => ep.locked) && <p className="settings-hint">Tập khóa cần mở khóa trên nền tảng nguồn, ứng dụng này không cung cấp mở khóa; chọn tất cả và chọn theo khoảng sẽ tự động bỏ qua.</p>}
 
-          {/* 筛选与操作栏 */}
+          {/* Thanh lọc và thao tác */}
           <div className="controls-row">
             <div className="select-buttons">
-              <button className="btn-chip" onClick={handleSelectAll}>全选</button>
-              <button className="btn-chip" onClick={handleInvertSelect}>反选</button>
-              <button className="btn-chip" onClick={handleDeselectAll}>取消全选</button>
+              <button className="btn-chip" onClick={handleSelectAll}>Chọn tất cả</button>
+              <button className="btn-chip" onClick={handleInvertSelect}>Đảo chọn</button>
+              <button className="btn-chip" onClick={handleDeselectAll}>Bỏ chọn tất cả</button>
               <span className="divider"></span>
-              <button className="btn-chip" onClick={() => handleQuickSelect('first10')}>前 10 集</button>
-              <button className="btn-chip" onClick={() => handleQuickSelect('first30')}>前 30 集</button>
-              <button className="btn-chip" onClick={() => handleQuickSelect('last30')}>后 30 集</button>
+              <button className="btn-chip" onClick={() => handleQuickSelect('first10')}>10 tập đầu</button>
+              <button className="btn-chip" onClick={() => handleQuickSelect('first30')}>30 tập đầu</button>
+              <button className="btn-chip" onClick={() => handleQuickSelect('last30')}>30 tập cuối</button>
             </div>
 
             <div className="range-filter">
-              <span className="range-label">范围筛选:</span>
+              <span className="range-label">Lọc theo khoảng:</span>
               <input
                 type="text"
                 className="range-input"
-                aria-label="选择集数范围"
-                placeholder="如 1-30 或 1,5,10"
+                aria-label="Chọn khoảng tập"
+                placeholder="Ví dụ 1-30 hoặc 1,5,10"
                 value={rangeInput}
                 onChange={(e) => setRangeInput(e.target.value)}
                 onKeyDown={(e) => isSubmitKey(e) && handleApplyRange()}
               />
-              <button className="btn-chip btn-chip-primary" onClick={handleApplyRange}>应用</button>
+              <button className="btn-chip btn-chip-primary" onClick={handleApplyRange}>Áp dụng</button>
             </div>
           </div>
 
-          {/* 剧集网格列表 */}
+          {/* Lưới danh sách tập */}
           <div className="episode-grid">
             {seriesData.episodes.map((ep) => {
               const isChecked = selectedVids.has(ep.vid);
@@ -407,7 +407,7 @@ function HongguoDownload({ onNavigate, active = true }) {
                 <button
                   type="button"
                   disabled={ep.locked === true}
-                  title={ep.locked ? '需在来源平台解锁' : undefined}
+                  title={ep.locked ? 'Cần mở khóa trên nền tảng nguồn' : undefined}
                   aria-pressed={isChecked}
                   key={ep.vid}
                   className={`episode-card ${isChecked ? 'selected' : ''}`}
@@ -417,8 +417,8 @@ function HongguoDownload({ onNavigate, active = true }) {
                     {isChecked ? <CheckSquare size={18} className="icon-checked" /> : <Square size={18} className="icon-unchecked" />}
                   </div>
                   <div className="episode-info">
-                    <span className="episode-num">第 {String(ep.vid_index).padStart(2, '0')} 集</span>
-                    {ep.locked ? <span className="episode-title">锁定 · 需在来源解锁</span> : ep.title && <span className="episode-title">{ep.title}</span>}
+                    <span className="episode-num">Tập {String(ep.vid_index).padStart(2, '0')}</span>
+                    {ep.locked ? <span className="episode-title">Khóa · Cần mở trên nguồn</span> : ep.title && <span className="episode-title">{ep.title}</span>}
                   </div>
                 </button>
               );
