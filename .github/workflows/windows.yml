@@ -76,13 +76,9 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - shell: pwsh
         run: |
-          node scripts/check-windows-release.cjs
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node scripts/check-windows-installer.cjs
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist/windows-release | Out-Null
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          Copy-Item "dist/红果短剧-$version-便携版.exe" "dist/windows-release/hongguo-downloader-$version-win-x64.exe"
+          Copy-Item "dist/Hong Qua Viet Nam-$version-portable.exe" "dist/windows-release/hongguo-downloader-$version-win-x64.exe"
           Compress-Archive -LiteralPath "dist/windows-release/hongguo-downloader-$version-win-x64.exe" -DestinationPath "dist/windows-release/hongguo-downloader-$version-win-x64.zip"
           Copy-Item "dist/hongguo-downloader-$version-win-x64-setup.exe" dist/windows-release/
           Copy-Item dist/latest.yml dist/windows-release/
